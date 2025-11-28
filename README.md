@@ -99,51 +99,54 @@ pnpm build       # Build for production
 
 ## Becoming an x402 Provider
 
-To set up your own x402-protected API:
+To monetize your database with pay-per-query access:
 
-### 1. Register with Gateway
+### 1. Sign Up for SerenDB
 
-Contact SerenAI to register your API endpoint:
+Create an account at [console.serendb.com](https://console.serendb.com) to get:
 
-- API base URL
-- Authentication requirements
-- Supported endpoints
+- A managed PostgreSQL database connection string
+- API keys for the x402 gateway
 
-### 2. Configure Pricing
+### 2. Register Your Provider
 
-Set per-endpoint pricing in the gateway catalog:
+```bash
+curl -X POST https://x402.serendb.com/api/providers/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Database",
+    "email": "provider@example.com",
+    "walletAddress": "0xYourWalletAddress",
+    "connectionString": "postgresql://user:pass@host:5432/db"
+  }'
+```
 
-```json
-{
-  "providerId": "your-uuid",
-  "name": "Your API",
-  "baseUrl": "https://api.yourservice.com",
-  "endpoints": [
-    {
-      "path": "/v1/data/*",
-      "method": "GET",
-      "priceUsdcAtomic": "100000"
-    }
-  ],
-  "walletAddress": "0xYourWallet"
-}
+Returns your `providerId` and `apiKey`.
+
+### 3. Configure Pricing
+
+```bash
+curl -X POST https://x402.serendb.com/api/providers/{providerId}/pricing \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "basePricePer1000Rows": 1.0,
+    "markupMultiplier": 2.0
+  }'
 ```
 
 Pricing is in USDC atomic units (6 decimals). `100000` = $0.10 USD.
 
-### 3. Handle x402 Flow
-
-Your API receives requests with `X-PAYMENT` header containing:
-
-- Signed authorization for USDC transfer
-- User wallet address
-- Payment amount
-
-The gateway validates payment before proxying to your API.
-
 ### 4. Receive Payments
 
-Payments settle directly to your wallet address on Base via USDC `transferWithAuthorization`.
+When agents query your database:
+
+1. Gateway returns `402` with `PaymentRequirements`
+2. Agent signs EIP-3009 authorization
+3. Gateway settles USDC to your wallet on Base
+4. Query executes and results return to agent
+
+Payments settle directly via `transferWithAuthorization` - no custodial balances required.
 
 ---
 
