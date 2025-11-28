@@ -29,3 +29,7 @@ pnpm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Claude Code
+CLAUDE.md
+docs/x402-mcp-server-implementation.md
