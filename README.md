@@ -1,4 +1,4 @@
-# x402 MCP Server
+# SerenAI Pay Per Query with x402 MCP Server
 
 MCP server enabling AI agents to pay for x402-protected API queries using USDC on Base.
 
