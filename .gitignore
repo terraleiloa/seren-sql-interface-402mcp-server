@@ -8,6 +8,7 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.test
 
 # IDE
 .idea/
@@ -33,3 +34,7 @@ pnpm-debug.log*
 # Claude Code
 CLAUDE.md
 docs/x402-mcp-server-implementation.md
+
+# Debug scripts
+debug-*.ts
+check-providers.ts

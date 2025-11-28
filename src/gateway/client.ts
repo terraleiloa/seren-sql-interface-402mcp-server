@@ -34,8 +34,11 @@ export class GatewayClient {
       throw new Error(`Failed to list providers: ${response.status}`);
     }
 
-    const data = await response.json() as { providers: Provider[] };
-    return data.providers;
+    const data = await response.json();
+    if (Array.isArray(data)) {
+      return data as Provider[];
+    }
+    return (data as { providers: Provider[] }).providers;
   }
 
   /**

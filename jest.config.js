@@ -33,5 +33,6 @@ export default {
       lines: 20,
       statements: 20
     }
-  }
+  },
+  testTimeout: 30000
 };

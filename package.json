@@ -12,7 +12,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
-    "test:ci": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage"
+    "test:ci": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
+    "test:e2e": "NODE_OPTIONS='--experimental-vm-modules' jest tests/e2e --runInBand",
+    "test:e2e:watch": "NODE_OPTIONS='--experimental-vm-modules' jest tests/e2e --watch --runInBand"
   },
   "keywords": [
     "mcp",
@@ -20,11 +22,10 @@
     "payments",
     "usdc",
     "base",
-    "ai-agents",
-    "claude"
+    "ai-agents"
   ],
   "author": "SerenAI",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/serenorg/x402-mcp-server.git"
