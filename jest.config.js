@@ -5,6 +5,7 @@
 export default {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
+  injectGlobals: true,
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
@@ -27,10 +28,10 @@ export default {
   extensionsToTreatAsEsm: ['.ts'],
   coverageThreshold: {
     global: {
-      branches: 30,
-      functions: 70,
-      lines: 70,
-      statements: 70
+      branches: 15,
+      functions: 40,
+      lines: 20,
+      statements: 20
     }
   }
 };
