@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@walletconnect/sign-client": "2.23.0",
     "dotenv": "^16.4.0",
     "viem": "^2.38.0",
     "zod": "^3.23.0"
