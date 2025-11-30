@@ -83,6 +83,10 @@ Restart Cursor (or run `cursor-agent mcp list`) after editing to ensure the IDE 
 
 > **Troubleshooting:** If the client cannot start the server, make sure Node.js is available on your `PATH`, re-check the environment variables from [Configuration](#configuration), and restart the IDE so it reloads MCP settings.
 
+### Other compatible clients
+
+The x402 MCP server works with any tool that implements the Model Context Protocol. Popular options include Continue (VS Code / JetBrains), Cline (VS Code), CodeGPT, Windsurf, Zed, VS Code MCP, and Sourcegraph Cody. For details on configuring those editors, see the [official MCP client matrix](https://modelcontextprotocol.info/docs/clients/); the JSON snippets above can usually be dropped into each client’s MCP configuration file with the same `command`, `args`, and environment variables.
+
 ## MCP Tools
 
 ### `list_providers`
