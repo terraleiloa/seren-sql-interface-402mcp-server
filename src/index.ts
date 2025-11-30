@@ -9,6 +9,7 @@ import { config } from './config/index.js';
 import { payForQuery } from './tools/payForQuery.js';
 import { listProviders } from './tools/listProviders.js';
 import { getProviderDetails } from './tools/getProviderDetails.js';
+import { getProviderPricingDetails } from './tools/getProviderPricingDetails.js';
 import { GatewayClient } from './gateway/client.js';
 import { PrivateKeyWalletProvider } from './wallet/privatekey.js';
 import type { WalletProvider } from './wallet/types.js';
@@ -193,6 +194,62 @@ server.registerTool(
               text: JSON.stringify({
                 success: true,
                 provider: result.provider,
+              }, null, 2),
+            },
+          ],
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                error: result.error,
+              }, null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Register get_provider_pricing_details tool
+server.registerTool(
+  'get_provider_pricing_details',
+  {
+    description: 'Get detailed pricing configuration (basePricePer1000Rows, markupMultiplier) for a specific x402-protected API provider.',
+    inputSchema: z.object({
+      provider_id: z.string().describe('UUID of the API provider'),
+    }),
+  },
+  async (args) => {
+    try {
+      const result = await getProviderPricingDetails(args, gatewayClient);
+
+      if (result.success) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: true,
+                pricing: result.pricing,
               }, null, 2),
             },
           ],

@@ -69,3 +69,12 @@ export interface ProxyRequest {
     headers?: Record<string, string>;
   };
 }
+
+export interface ProviderPricingConfig {
+  id: string;
+  providerId: string;
+  basePricePer1000Rows: number;
+  markupMultiplier: number;
+  createdAt: string;
+  updatedAt: string;
+}

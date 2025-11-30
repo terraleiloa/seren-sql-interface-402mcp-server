@@ -6,6 +6,7 @@ import type {
   PaymentRequirementsResponse,
   PaymentPayload,
   Provider,
+  ProviderPricingConfig,
   ProxyRequest,
 } from './types.js';
 
@@ -68,6 +69,22 @@ export class GatewayClient {
     }
 
     return response.json() as Promise<Provider>;
+  }
+
+  /**
+   * Get detailed pricing configuration for a specific provider
+   */
+  async getProviderPricing(providerId: string): Promise<ProviderPricingConfig> {
+    const response = await fetch(`${this.baseUrl}/api/providers/${providerId}/pricing`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Pricing configuration not found for provider: ${providerId}`);
+      }
+      throw new Error(`Failed to get pricing for provider ${providerId}: ${response.status}`);
+    }
+
+    return response.json() as Promise<ProviderPricingConfig>;
   }
 
   /**
