@@ -34,11 +34,27 @@ export class GatewayClient {
       throw new Error(`Failed to list providers: ${response.status}`);
     }
 
-    const data = await response.json();
-    if (Array.isArray(data)) {
-      return data as Provider[];
+    // Manually parse to ensure robustness against subtle fetch/environment issues
+    const responseText = await response.text();
+    try {
+      const data = JSON.parse(responseText);
+
+      // Handle direct array response
+      if (Array.isArray(data)) {
+        return data as Provider[];
+      }
+      
+      // Handle object-wrapped array response (e.g., { "providers": [...] })
+      if (data && Array.isArray(data.providers)) {
+        return data.providers;
+      }
+
+      // If the response is not in a known format, return an empty array
+      return [];
+    } catch (e) {
+      // Handle cases where the response text is not valid JSON
+      throw new Error('Failed to parse JSON response from gateway');
     }
-    return (data as { providers: Provider[] }).providers;
   }
 
   /**

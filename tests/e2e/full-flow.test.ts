@@ -10,7 +10,7 @@ import { listProviders } from '../../src/tools/listProviders.js';
 import { UserRejectedError } from '../../src/wallet/types.js';
 
 // Load test configuration
-dotenv.config({ path: '.env.test' });
+dotenv.config();
 
 // Increase timeout for E2E tests involving blockchain
 jest.setTimeout(30000);
@@ -40,8 +40,11 @@ runTests('x402 MCP Server E2E Tests', () => {
             }
             // Prefer 'api' type providers for testing
             const apiProvider = providers.find(p => p.providerType === 'api');
-            testProviderId = apiProvider ? apiProvider.id : providers[0].id;
-            console.log(`Using discovered provider: ${testProviderId}`);
+            if (!apiProvider) {
+                throw new Error('No API type provider found in gateway catalog. Please ensure an API provider is registered for E2E tests.');
+            }
+            testProviderId = apiProvider.id;
+            console.log(`Using discovered API provider: ${testProviderId}`);
         }
     });
 
