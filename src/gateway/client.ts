@@ -107,10 +107,13 @@ export class GatewayClient {
       headers['X-PAYMENT'] = this.encodePaymentPayload(paymentPayload);
     }
 
-    const response = await fetch(`${this.baseUrl}/api/proxy`, {
+    const url = `${this.baseUrl}/api/proxy`;
+    const body = JSON.stringify(request);
+
+    const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(request),
+      body,
     });
 
     if (response.status === 402) {
@@ -119,7 +122,13 @@ export class GatewayClient {
     }
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
+      const errorText = await response.text();
+      let errorBody: { error?: string };
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch {
+        errorBody = { error: errorText || 'Unknown error' };
+      }
       throw new Error(`Proxy request failed: ${errorBody.error ?? response.status}`);
     }
 

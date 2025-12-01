@@ -86,8 +86,16 @@ describe('PrivateKeyWalletProvider', () => {
 
     it('should throw when no private key provided', async () => {
       const wallet = new PrivateKeyWalletProvider();
+      // Temporarily clear env var to test error path
+      const savedKey = process.env.WALLET_PRIVATE_KEY;
+      delete process.env.WALLET_PRIVATE_KEY;
 
-      await expect(wallet.connect()).rejects.toThrow('Private key required');
+      try {
+        await expect(wallet.connect()).rejects.toThrow('Private key required');
+      } finally {
+        // Restore env var
+        if (savedKey) process.env.WALLET_PRIVATE_KEY = savedKey;
+      }
     });
   });
 
