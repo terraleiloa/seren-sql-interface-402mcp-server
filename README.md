@@ -1,6 +1,9 @@
 # SerenAI Pay Per Query with x402 MCP Server
 
-MCP server enabling AI agents to pay for x402-protected API queries using USDC on Base.
+[![npm version](https://img.shields.io/npm/v/@serendb/x402-mcp-server.svg)](https://www.npmjs.com/package/@serendb/x402-mcp-server)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+MCP server enabling AI agents to pay for x402-protected database queries and API calls using USDC on Base.
 
 ## Installation
 
@@ -79,7 +82,7 @@ Cursor supports MCP servers via either the global file `~/.cursor/mcp.json` (app
 }
 ```
 
-Restart Cursor (or run `cursor-agent mcp list`) after editing to ensure the IDE reloads the server definition and exposes the `list_publishers`, `get_publisher_details`, and `pay_for_query` tools.
+Restart Cursor (or run `cursor-agent mcp list`) after editing to ensure the IDE reloads the server definition and exposes the `list_publishers`, `get_publisher_details`, `pay_for_query`, and `query_database` tools.
 
 > **Troubleshooting:** If the client cannot start the server, make sure Node.js is available on your `PATH`, re-check the environment variables from [Configuration](#configuration), and restart the IDE so it reloads MCP settings.
 
