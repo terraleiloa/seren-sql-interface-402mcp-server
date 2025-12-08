@@ -5,7 +5,7 @@ import { GatewayClient } from '../gateway/client.js';
 import { PrivateKeyWalletProvider } from '../wallet/privatekey.js';
 import type { WalletProvider } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
-import type { PaymentPayload, PaymentRequirement, QueryResult } from '../gateway/types.js';
+import type { PaymentPayload, PaymentRequirement, QueryResult, Publisher } from '../gateway/types.js';
 import { UserRejectedError } from '../wallet/types.js';
 
 export interface ExecuteQueryParams {
@@ -179,9 +179,10 @@ export class SerenService {
    * Allows DDL (CREATE/DROP) and DML (INSERT/UPDATE) operations
    * @param sql - SQL query to execute (any type allowed for admin)
    * @param apiKey - SerenDB API key for authentication
+   * @param publisherId - Optional publisher ID (may be required by some endpoints)
    * @returns Query results
    */
-  async executeAdminQuery(sql: string, apiKey: string): Promise<ExecuteQueryResult> {
+  async executeAdminQuery(sql: string, apiKey: string, publisherId?: string): Promise<ExecuteQueryResult> {
     // Validate input
     if (!sql || !sql.trim()) {
       return { success: false, error: 'SQL query is required' };
@@ -196,14 +197,18 @@ export class SerenService {
       const url = `${this.gatewayUrl}/api/query`;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'X-API-Key': apiKey,
       };
 
-      // For admin queries, we may not need providerId, but check if the API requires it
-      // If it does, we'll need to handle that - for now, make a minimal request
-      const body = JSON.stringify({
+      // Build request body - include publisherId if provided
+      const requestBody: { sql: string; publisherId?: string } = {
         sql: sql.trim(),
-      });
+      };
+      if (publisherId && publisherId.trim()) {
+        requestBody.publisherId = publisherId.trim();
+      }
+
+      const body = JSON.stringify(requestBody);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -213,23 +218,31 @@ export class SerenService {
 
       // Handle authentication errors
       if (response.status === 401 || response.status === 403) {
-        return { 
-          success: false, 
-          error: 'Admin authentication failed. Please check your SEREN_API_KEY.' 
-        };
-      }
-
-      if (!response.ok) {
         const errorText = await response.text();
         let errorBody: { error?: string };
         try {
           errorBody = JSON.parse(errorText);
         } catch {
-          errorBody = { error: errorText || `HTTP ${response.status}` };
+          errorBody = { error: errorText || 'Authentication failed' };
         }
         return { 
           success: false, 
-          error: errorBody.error || `Query failed with status ${response.status}` 
+          error: `Admin authentication failed: ${errorBody.error || 'Please check your SEREN_API_KEY.'}` 
+        };
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorBody: { error?: string; message?: string };
+        try {
+          errorBody = JSON.parse(errorText);
+        } catch {
+          errorBody = { error: errorText || `HTTP ${response.status}` };
+        }
+        const errorMessage = errorBody.error || errorBody.message || `Query failed with status ${response.status}`;
+        return { 
+          success: false, 
+          error: errorMessage
         };
       }
 
@@ -245,9 +258,147 @@ export class SerenService {
       };
     } catch (error) {
       if (error instanceof Error) {
-        return { success: false, error: error.message };
+        return { success: false, error: `Network error: ${error.message}` };
       }
       return { success: false, error: 'Unknown error occurred' };
+    }
+  }
+
+  /**
+   * Get publisher information associated with the API key
+   * @param apiKey - SerenDB API key for authentication
+   * @returns Publisher information
+   */
+  async getPublisherInfo(apiKey: string): Promise<{ success: boolean; publisher?: Publisher; error?: string }> {
+    try {
+      if (!apiKey || !apiKey.trim()) {
+        return { success: false, error: 'API key is required' };
+      }
+
+      // Try to fetch publisher info using the API key
+      // This endpoint might vary - trying common patterns
+      const url = `${this.gatewayUrl}/api/publishers/me`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+      };
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return {
+          success: false,
+          error: 'Admin authentication failed. Please check your SEREN_API_KEY.',
+        };
+      }
+
+      if (!response.ok) {
+        // If /api/publishers/me doesn't work, try /api/publishers
+        const altUrl = `${this.gatewayUrl}/api/publishers`;
+        const altResponse = await fetch(altUrl, {
+          method: 'GET',
+          headers,
+        });
+
+        if (altResponse.ok) {
+          const data = await altResponse.json();
+          // Handle both array and object responses
+          const publishers = Array.isArray(data) ? data : (data.publishers || data.providers || []);
+          if (publishers.length > 0) {
+            return {
+              success: true,
+              publisher: publishers[0] as Publisher,
+            };
+          }
+        }
+
+        const errorText = await response.text();
+        let errorBody: { error?: string; message?: string };
+        try {
+          errorBody = JSON.parse(errorText);
+        } catch {
+          errorBody = { error: errorText || `HTTP ${response.status}` };
+        }
+        return {
+          success: false,
+          error: errorBody.error || errorBody.message || `Failed to fetch publisher info: ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      // Handle both direct publisher object and wrapped responses
+      const publisher = data.publisher || data;
+      
+      return {
+        success: true,
+        publisher: publisher as Publisher,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        return { success: false, error: `Network error: ${error.message}` };
+      }
+      return { success: false, error: 'Unknown error occurred' };
+    }
+  }
+
+  /**
+   * List all tables in the public schema
+   * @param apiKey - SerenDB API key for authentication
+   * @param publisherId - Optional publisher ID (may be required by some endpoints)
+   * @returns Array of table names
+   */
+  async listTables(apiKey: string, publisherId?: string): Promise<ExecuteQueryResult> {
+    const sql = `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;`;
+    return this.executeAdminQuery(sql, apiKey, publisherId);
+  }
+
+  /**
+   * Get schema details for a specific table
+   * @param tableName - Name of the table to inspect
+   * @param apiKey - SerenDB API key for authentication
+   * @param publisherId - Optional publisher ID (may be required by some endpoints)
+   * @returns Table schema information (columns, types, constraints)
+   */
+  async getTableSchema(tableName: string, apiKey: string, publisherId?: string): Promise<ExecuteQueryResult> {
+    // Sanitize table name to prevent SQL injection
+    // Only allow alphanumeric characters and underscores
+    if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+      return { 
+        success: false, 
+        error: 'Invalid table name. Only alphanumeric characters and underscores are allowed.' 
+      };
+    }
+
+    const sql = `SELECT column_name, data_type, is_nullable, column_default 
+                 FROM information_schema.columns 
+                 WHERE table_name = '${tableName}' AND table_schema = 'public'
+                 ORDER BY ordinal_position;`;
+    return this.executeAdminQuery(sql, apiKey, publisherId);
+  }
+
+  /**
+   * List available publishers from the gateway catalog
+   * @param options - Optional filters (category, type)
+   * @returns Array of publishers
+   */
+  async listPublishers(options?: {
+    category?: string;
+    type?: 'database' | 'api' | 'both';
+  }): Promise<{ success: boolean; publishers?: Publisher[]; error?: string }> {
+    try {
+      const publishers = await this.gatewayClient.listPublishers(options);
+      return {
+        success: true,
+        publishers,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
     }
   }
 

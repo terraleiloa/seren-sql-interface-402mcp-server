@@ -38,6 +38,7 @@ const executeSqlSchema = z.object({
 
 const executeAdminSqlSchema = z.object({
   sql: z.string().min(1, 'SQL query is required'),
+  publisherId: z.string().optional(),
 });
 
 /**
@@ -111,10 +112,10 @@ app.post('/api/admin/execute', async (req, res) => {
       });
     }
 
-    const { sql } = validationResult.data;
+    const { sql, publisherId } = validationResult.data;
 
     // Execute admin query using shared service
-    const result = await serenService.executeAdminQuery(sql, apiKey);
+    const result = await serenService.executeAdminQuery(sql, apiKey, publisherId);
 
     if (result.success) {
       return res.status(200).json({
@@ -126,8 +127,10 @@ app.post('/api/admin/execute', async (req, res) => {
         executionTime: result.executionTime,
       });
     } else {
+      // Log the error for debugging
+      console.error('Admin query execution failed:', result.error);
       // Determine appropriate status code based on error
-      const statusCode = result.error?.includes('authentication') ? 401 : 500;
+      const statusCode = result.error?.includes('authentication') || result.error?.includes('401') || result.error?.includes('403') ? 401 : 500;
       return res.status(statusCode).json({
         success: false,
         error: result.error || 'Query execution failed',
@@ -135,6 +138,163 @@ app.post('/api/admin/execute', async (req, res) => {
     }
   } catch (error) {
     console.error('Error executing admin SQL query:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('Error details:', errorMessage);
+    return res.status(500).json({
+      success: false,
+      error: errorMessage,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/publisher
+ * Get publisher information for the API key
+ */
+app.get('/api/admin/publisher', async (req, res) => {
+  try {
+    // Check if API key is configured
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Admin API key not configured. SEREN_API_KEY environment variable is required.',
+      });
+    }
+
+    // Get publisher info using shared service
+    const result = await serenService.getPublisherInfo(apiKey);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        publisher: result.publisher,
+      });
+    } else {
+      const statusCode = result.error?.includes('authentication') ? 401 : 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: result.error || 'Failed to get publisher info',
+      });
+    }
+  } catch (error) {
+    console.error('Error getting publisher info:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/admin/tables
+ * List all tables in the public schema
+ */
+app.get('/api/admin/tables', async (req, res) => {
+  try {
+    // Check if API key is configured
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Admin API key not configured. SEREN_API_KEY environment variable is required.',
+      });
+    }
+
+    // List tables using shared service
+    const result = await serenService.listTables(apiKey);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        tables: result.rows?.map((row) => (row as { table_name: string }).table_name) || [],
+      });
+    } else {
+      const statusCode = result.error?.includes('authentication') ? 401 : 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: result.error || 'Failed to list tables',
+      });
+    }
+  } catch (error) {
+    console.error('Error listing tables:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/admin/tables/:name
+ * Get schema details for a specific table
+ */
+app.get('/api/admin/tables/:name', async (req, res) => {
+  try {
+    // Check if API key is configured
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Admin API key not configured. SEREN_API_KEY environment variable is required.',
+      });
+    }
+
+    const tableName = req.params.name;
+    // Get optional publisherId from query parameter
+    const publisherId = req.query.publisherId as string | undefined;
+
+    // Get table schema using shared service
+    const result = await serenService.getTableSchema(tableName, apiKey, publisherId);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        tableName,
+        columns: result.rows || [],
+      });
+    } else {
+      const statusCode = result.error?.includes('authentication') ? 401 : 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: result.error || 'Failed to get table schema',
+      });
+    }
+  } catch (error) {
+    console.error('Error getting table schema:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/providers
+ * List available providers/publishers from the gateway catalog
+ * Optional query params: category, type (database|api|both)
+ */
+app.get('/api/providers', async (req, res) => {
+  try {
+    const category = req.query.category as string | undefined;
+    const type = req.query.type as 'database' | 'api' | 'both' | undefined;
+
+    const options: { category?: string; type?: 'database' | 'api' | 'both' } = {};
+    if (category) options.category = category;
+    if (type) options.type = type;
+
+    const result = await serenService.listPublishers(options);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        providers: result.publishers || [],
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to list providers',
+      });
+    }
+  } catch (error) {
+    console.error('Error listing providers:', error);
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',

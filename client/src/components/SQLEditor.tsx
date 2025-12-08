@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Play, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 
@@ -13,12 +13,56 @@ interface QueryResult {
   txHash?: string;
 }
 
+interface Provider {
+  id: string;
+  name: string;
+  resourceName?: string;
+  resourceDescription?: string;
+  publisherType: 'database' | 'api' | 'both';
+  pricePerCall?: string;
+  categories?: string[];
+}
+
 export default function SQLEditor() {
   const [query, setQuery] = useState('SELECT * FROM vaults LIMIT 5');
-  const [providerId, setProviderId] = useState('4cb187b9-b814-483c-a180-c24902ca2720');
+  const [providerId, setProviderId] = useState('');
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
   const [results, setResults] = useState<QueryResult | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch providers on component mount
+  useEffect(() => {
+    fetchProviders();
+  }, []);
+
+  const fetchProviders = async () => {
+    setLoadingProviders(true);
+    try {
+      const response = await axios.get<{
+        success: boolean;
+        providers?: Provider[];
+        error?: string;
+      }>('http://localhost:3000/api/providers');
+
+      if (response.data.success && response.data.providers) {
+        setProviders(response.data.providers);
+        // Auto-select first provider if available and none is selected
+        if (response.data.providers.length > 0 && !providerId) {
+          setProviderId(response.data.providers[0].id);
+        }
+      } else {
+        console.error('Failed to fetch providers:', response.data.error);
+        setError('Failed to load providers. Please refresh the page.');
+      }
+    } catch (err) {
+      console.error('Error fetching providers:', err);
+      setError('Failed to load providers. Please refresh the page.');
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
 
   const executeQuery = async () => {
     if (!query.trim() || !providerId.trim()) {
@@ -163,22 +207,45 @@ export default function SQLEditor() {
             htmlFor="providerId"
             style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#495057' }}
           >
-            Provider ID
+            Provider
           </label>
-          <input
-            id="providerId"
-            type="text"
-            value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
-            placeholder="Enter provider ID"
-            style={{
-              width: '100%',
-              padding: '10px',
-              border: '1px solid #ced4da',
+          {loadingProviders ? (
+            <div style={{ 
+              width: '100%', 
+              padding: '10px', 
+              border: '1px solid #ced4da', 
               borderRadius: '4px',
-              fontSize: '14px',
-            }}
-          />
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              color: '#6c757d'
+            }}>
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+              <span>Loading providers...</span>
+            </div>
+          ) : (
+            <select
+              id="providerId"
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ced4da',
+                borderRadius: '4px',
+                fontSize: '14px',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="">Select a provider...</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} {provider.resourceName ? `(${provider.resourceName})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div style={{ marginBottom: '20px' }}>
