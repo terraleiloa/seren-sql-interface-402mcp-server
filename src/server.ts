@@ -6,6 +6,7 @@ import cors from 'cors';
 import { config } from './config/index.js';
 import { SerenService } from './services/serenService.js';
 import { z } from 'zod';
+import pg from 'pg';
 
 const app = express();
 
@@ -39,6 +40,11 @@ const executeSqlSchema = z.object({
 const executeAdminSqlSchema = z.object({
   sql: z.string().min(1, 'SQL query is required'),
   publisherId: z.string().optional(),
+});
+
+const executeDirectSqlSchema = z.object({
+  sql: z.string().min(1, 'SQL query is required'),
+  connectionString: z.string().min(1, 'Connection string is required'),
 });
 
 /**
@@ -84,6 +90,62 @@ app.post('/api/execute-sql', async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
+  }
+});
+
+/**
+ * POST /api/direct/execute
+ * Execute SQL directly against a connection string
+ * Bypasses x402 payment flow
+ */
+app.post('/api/direct/execute', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    // Validate request body
+    const validationResult = executeDirectSqlSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { sql, connectionString } = validationResult.data;
+
+    // Create new client for this request
+    // Note: In production, you might want connection pooling, but for this tool
+    // a single client per request is safer to ensure no leaked state
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+    const startTime = Date.now();
+    const result = await client.query(sql);
+    const executionTime = Date.now() - startTime;
+
+    return res.status(200).json({
+      success: true,
+      rows: result.rows,
+      rowCount: result.rowCount,
+      executionTime,
+    });
+  } catch (error) {
+    console.error('Error executing direct SQL:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
   }
 });
 
