@@ -83,14 +83,22 @@ Because this command uses `npx`, Claude Code will always run the latest publishe
 
 ### Cursor
 
-Cursor supports MCP servers via either the global file `~/.cursor/mcp.json` (applies to every workspace) or a project-scoped `.cursor/mcp.json`. In Cursor go to Settings → Features → Model Context Protocol to manage entries visually, or edit the JSON manually:
+Cursor supports MCP servers via either the global file `~/.cursor/mcp.json` (applies to every workspace) or a project-scoped `.cursor/mcp.json`. In Cursor go to Settings → Features → Model Context Protocol to manage entries visually, or edit the JSON manually.
+
+> **Important:** Cursor has a 60-second timeout for MCP server startup. Using `npx` can cause timeout errors on first run because npm needs to download the package (~30s). To avoid this, **pre-install the package globally** before configuring Cursor:
+
+```bash
+npm install -g @serendb/x402-mcp-server
+```
+
+Then configure Cursor to use the global installation:
 
 ```json
 {
   "mcpServers": {
     "x402": {
-      "command": "npx",
-      "args": ["@serendb/x402-mcp-server"],
+      "command": "x402-mcp-server",
+      "args": [],
       "env": {
         "X402_GATEWAY_URL": "https://x402.serendb.com",
         "WALLET_PRIVATE_KEY": "0x...",
@@ -101,11 +109,27 @@ Cursor supports MCP servers via either the global file `~/.cursor/mcp.json` (app
 }
 ```
 
-Restart Cursor (or run `cursor-agent mcp list`) after editing to ensure the IDE reloads the server definition and exposes the `list_publishers`, `get_publisher_details`, `pay_for_query`, and `query_database` tools.
+Alternatively, if you have the repository cloned locally, point directly to the built binary:
 
-The embedded `npx` command means Cursor never needs a checked-out copy of this repository; it downloads the package each time (or from the npm cache) as long as Node.js/npm are available.
+```json
+{
+  "mcpServers": {
+    "x402": {
+      "command": "node",
+      "args": ["/path/to/x402-mcp-server/dist/index.js"],
+      "env": {
+        "X402_GATEWAY_URL": "https://x402.serendb.com",
+        "WALLET_PRIVATE_KEY": "0x...",
+        "BASE_RPC_URL": "https://mainnet.base.org"
+      }
+    }
+  }
+}
+```
 
-> **Troubleshooting:** If the client cannot start the server, make sure Node.js is available on your `PATH`, re-check the environment variables from [Configuration](#configuration), and restart the IDE so it reloads MCP settings. If `npx` reports it cannot find `@serendb/x402-mcp-server`, upgrade npm (e.g., `npm install -g npm`) or clear the local cache with `npx cache clear` and retry.
+Restart Cursor after editing to ensure the IDE reloads the server definition and exposes the `list_publishers`, `get_publisher_details`, `pay_for_query`, and `query_database` tools.
+
+> **Troubleshooting:** If you see "No server info found" or "Client closed for command" errors, the server is timing out during startup. Pre-install globally with `npm install -g @serendb/x402-mcp-server` to fix this. Also ensure Node.js is available on your `PATH` and re-check the environment variables from [Configuration](#configuration).
 
 ### Other compatible clients
 
