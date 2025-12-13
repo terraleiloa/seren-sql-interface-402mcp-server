@@ -1,0 +1,212 @@
+.table-viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg-primary);
+}
+
+.table-viewer-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.table-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.breadcrumb-separator {
+    color: var(--text-secondary);
+}
+
+.table-viewer-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 8px 16px 0;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.table-viewer-tabs .tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.table-viewer-tabs .tab:hover {
+    color: var(--text-primary);
+    background: var(--hover-bg);
+}
+
+.table-viewer-tabs .tab.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+}
+
+.table-viewer-content {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+}
+
+.loading,
+.empty-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+/* Data Tab */
+.data-tab {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.data-tab-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 8px 0;
+}
+
+.row-count {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.export-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: all 0.2s;
+}
+
+.export-button:hover {
+    background: var(--hover-bg);
+}
+
+.data-grid-container {
+    flex: 1;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.data-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.data-grid thead {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 1;
+}
+
+.data-grid th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.data-grid td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-grid tbody tr:hover {
+    background: var(--hover-bg);
+}
+
+.data-grid tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Definition, Indexes, FK Tabs */
+.definition-tab,
+.indexes-tab,
+.fk-tab {
+    overflow: auto;
+}
+
+.definition-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.definition-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.definition-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.definition-table tbody tr:hover {
+    background: var(--hover-bg);
+}
+
+.definition-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* DDL Tab */
+.ddl-tab {
+    overflow: auto;
+}
+
+.ddl-code {
+    padding: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    overflow-x: auto;
+    white-space: pre-wrap;
+}

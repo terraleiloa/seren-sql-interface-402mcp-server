@@ -7,6 +7,7 @@ import { config } from './config/index.js';
 import { SerenService } from './services/serenService.js';
 import { z } from 'zod';
 import pg from 'pg';
+import Database from 'better-sqlite3';
 
 const app = express();
 
@@ -45,6 +46,19 @@ const executeAdminSqlSchema = z.object({
 const executeDirectSqlSchema = z.object({
   sql: z.string().min(1, 'SQL query is required'),
   connectionString: z.string().min(1, 'Connection string is required'),
+});
+
+// SQLite connection storage (filepath -> database instance)
+const sqliteConnections = new Map<string, Database.Database>();
+
+// SQLite validation schemas
+const sqliteConnectSchema = z.object({
+  filePath: z.string().min(1, 'File path is required'),
+});
+
+const sqliteExecuteSchema = z.object({
+  sql: z.string().min(1, 'SQL query is required'),
+  filePath: z.string().min(1, 'File path is required'),
 });
 
 /**
@@ -361,6 +375,572 @@ app.get('/api/providers', async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
+  }
+});
+
+/**
+ * Helper function to get or create SQLite connection
+ */
+function getSqliteConnection(filePath: string): Database.Database {
+  if (!sqliteConnections.has(filePath)) {
+    const db = new Database(filePath, {
+      readonly: false,
+      fileMustExist: filePath !== ':memory:'
+    });
+    sqliteConnections.set(filePath, db);
+  }
+  return sqliteConnections.get(filePath)!;
+}
+
+/**
+ * POST /api/sqlite/connect
+ * Test SQLite connection
+ */
+app.post('/api/sqlite/connect', async (req, res) => {
+  try {
+    const validationResult = sqliteConnectSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { filePath } = validationResult.data;
+    const db = getSqliteConnection(filePath);
+
+    // Test query to verify connection
+    const result = db.prepare('SELECT 1 as test').get();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Connection successful',
+      filePath,
+    });
+  } catch (error) {
+    console.error('Error connecting to SQLite:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * POST /api/sqlite/execute
+ * Execute SQL query against SQLite database
+ */
+app.post('/api/sqlite/execute', async (req, res) => {
+  try {
+    const validationResult = sqliteExecuteSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { sql, filePath } = validationResult.data;
+    const db = getSqliteConnection(filePath);
+
+    const startTime = Date.now();
+    const stmt = db.prepare(sql);
+
+    let rows;
+    let rowCount;
+
+    // Determine if this is a SELECT query or a modification query
+    const trimmedSql = sql.trim().toUpperCase();
+    if (trimmedSql.startsWith('SELECT') || trimmedSql.startsWith('PRAGMA')) {
+      rows = stmt.all();
+      rowCount = rows.length;
+    } else {
+      const result = stmt.run();
+      rowCount = result.changes;
+      rows = [];
+    }
+
+    const executionTime = Date.now() - startTime;
+
+    return res.status(200).json({
+      success: true,
+      rows,
+      rowCount,
+      executionTime,
+    });
+  } catch (error) {
+    console.error('Error executing SQLite query:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/sqlite/tables
+ * List all tables in SQLite database
+ */
+app.get('/api/sqlite/tables', async (req, res) => {
+  try {
+    const filePath = req.query.filePath as string;
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'filePath query parameter is required',
+      });
+    }
+
+    const db = getSqliteConnection(filePath);
+    const tables = db.prepare(`
+      SELECT name, type 
+      FROM sqlite_master 
+      WHERE type IN ('table', 'view') 
+        AND name NOT LIKE 'sqlite_%'
+      ORDER BY type, name
+    `).all();
+
+    return res.status(200).json({
+      success: true,
+      tables,
+    });
+  } catch (error) {
+    console.error('Error listing SQLite tables:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/sqlite/schema/:table
+ * Get table schema with columns, types, constraints
+ */
+app.get('/api/sqlite/schema/:table', async (req, res) => {
+  try {
+    const filePath = req.query.filePath as string;
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'filePath query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+    const db = getSqliteConnection(filePath);
+
+    // Get column information
+    const columns = db.prepare(`PRAGMA table_info('${tableName}')`).all();
+
+    // Get table DDL
+    const ddlResult = db.prepare(`
+      SELECT sql 
+      FROM sqlite_master 
+      WHERE type='table' AND name=?
+    `).get(tableName) as { sql: string } | undefined;
+
+    return res.status(200).json({
+      success: true,
+      tableName,
+      columns,
+      ddl: ddlResult?.sql || '',
+    });
+  } catch (error) {
+    console.error('Error getting SQLite table schema:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/sqlite/indexes/:table
+ * Get indexes for a table
+ */
+app.get('/api/sqlite/indexes/:table', async (req, res) => {
+  try {
+    const filePath = req.query.filePath as string;
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'filePath query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+    const db = getSqliteConnection(filePath);
+
+    const indexes = db.prepare(`PRAGMA index_list('${tableName}')`).all();
+
+    return res.status(200).json({
+      success: true,
+      indexes,
+    });
+  } catch (error) {
+    console.error('Error getting SQLite indexes:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/sqlite/foreign-keys/:table
+ * Get foreign key relationships
+ */
+app.get('/api/sqlite/foreign-keys/:table', async (req, res) => {
+  try {
+    const filePath = req.query.filePath as string;
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'filePath query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+    const db = getSqliteConnection(filePath);
+
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${tableName}')`).all();
+
+    return res.status(200).json({
+      success: true,
+      foreignKeys,
+    });
+  } catch (error) {
+    console.error('Error getting SQLite foreign keys:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/postgres/tables
+ * List all tables in the public schema
+ */
+app.get('/api/postgres/tables', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    const connectionString = req.query.connectionString as string;
+    if (!connectionString) {
+      return res.status(400).json({
+        success: false,
+        error: 'connectionString query parameter is required',
+      });
+    }
+
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+
+    const result = await client.query(`
+      SELECT 
+        table_name as name,
+        table_type as type
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `);
+
+    return res.status(200).json({
+      success: true,
+      tables: result.rows,
+    });
+  } catch (error) {
+    console.error('Error listing PostgreSQL tables:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
+  }
+});
+
+/**
+ * GET /api/postgres/schema/:table
+ * Get table schema with columns, types, constraints
+ */
+app.get('/api/postgres/schema/:table', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    const connectionString = req.query.connectionString as string;
+    if (!connectionString) {
+      return res.status(400).json({
+        success: false,
+        error: 'connectionString query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+
+    // Get column information
+    const columnsResult = await client.query(`
+      SELECT 
+        column_name as name,
+        data_type as type,
+        is_nullable,
+        column_default as dflt_value,
+        character_maximum_length,
+        numeric_precision,
+        numeric_scale
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+
+    // Get primary key information
+    const pkResult = await client.query(`
+      SELECT a.attname as column_name
+      FROM pg_index i
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+      WHERE i.indrelid = $1::regclass AND i.indisprimary
+    `, [tableName]);
+
+    const pkColumns = new Set(pkResult.rows.map(r => r.column_name));
+
+    // Format columns to match SQLite structure
+    const columns = columnsResult.rows.map((col, idx) => ({
+      cid: idx,
+      name: col.name,
+      type: col.type,
+      notnull: col.is_nullable === 'NO' ? 1 : 0,
+      dflt_value: col.dflt_value,
+      pk: pkColumns.has(col.name) ? 1 : 0,
+    }));
+
+    // Get DDL (simplified - just construct basic CREATE TABLE)
+    const ddl = `CREATE TABLE ${tableName} (\n  ${columns.map(c =>
+      `${c.name} ${c.type}${c.notnull ? ' NOT NULL' : ''}${c.pk ? ' PRIMARY KEY' : ''}`
+    ).join(',\n  ')}\n);`;
+
+    return res.status(200).json({
+      success: true,
+      tableName,
+      columns,
+      ddl,
+    });
+  } catch (error) {
+    console.error('Error getting PostgreSQL table schema:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
+  }
+});
+
+/**
+ * GET /api/postgres/indexes/:table
+ * Get indexes for a table
+ */
+app.get('/api/postgres/indexes/:table', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    const connectionString = req.query.connectionString as string;
+    if (!connectionString) {
+      return res.status(400).json({
+        success: false,
+        error: 'connectionString query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+
+    const result = await client.query(`
+      SELECT
+        i.relname as name,
+        ix.indisunique as unique,
+        ix.indisprimary as primary,
+        array_agg(a.attname ORDER BY a.attnum) as columns
+      FROM pg_class t
+      JOIN pg_index ix ON t.oid = ix.indrelid
+      JOIN pg_class i ON i.oid = ix.indexrelid
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+      WHERE t.relname = $1
+      GROUP BY i.relname, ix.indisunique, ix.indisprimary
+      ORDER BY i.relname
+    `, [tableName]);
+
+    const indexes = result.rows.map(idx => ({
+      name: idx.name,
+      unique: idx.unique ? 'YES' : 'NO',
+      origin: idx.primary ? 'primary key' : 'index',
+    }));
+
+    return res.status(200).json({
+      success: true,
+      indexes,
+    });
+  } catch (error) {
+    console.error('Error getting PostgreSQL indexes:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
+  }
+});
+
+/**
+ * GET /api/postgres/foreign-keys/:table
+ * Get foreign key relationships
+ */
+app.get('/api/postgres/foreign-keys/:table', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    const connectionString = req.query.connectionString as string;
+    if (!connectionString) {
+      return res.status(400).json({
+        success: false,
+        error: 'connectionString query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+
+    const result = await client.query(`
+      SELECT
+        kcu.column_name as "from",
+        ccu.table_name as "table",
+        ccu.column_name as "to",
+        rc.update_rule as on_update,
+        rc.delete_rule as on_delete
+      FROM information_schema.table_constraints AS tc 
+      JOIN information_schema.key_column_usage AS kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      JOIN information_schema.constraint_column_usage AS ccu
+        ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
+      JOIN information_schema.referential_constraints AS rc
+        ON rc.constraint_name = tc.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY' 
+        AND tc.table_name = $1
+        AND tc.table_schema = 'public'
+    `, [tableName]);
+
+    return res.status(200).json({
+      success: true,
+      foreignKeys: result.rows,
+    });
+  } catch (error) {
+    console.error('Error getting PostgreSQL foreign keys:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
+  }
+});
+
+/**
+ * GET /api/postgres/table-data/:table
+ * Get paginated table data
+ */
+app.get('/api/postgres/table-data/:table', async (req, res) => {
+  let client: pg.Client | null = null;
+  try {
+    const connectionString = req.query.connectionString as string;
+    if (!connectionString) {
+      return res.status(400).json({
+        success: false,
+        error: 'connectionString query parameter is required',
+      });
+    }
+
+    const tableName = req.params.table;
+    const limit = parseInt(req.query.limit as string) || 1000;
+
+    client = new pg.Client({
+      connectionString,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+    });
+
+    await client.connect();
+
+    const startTime = Date.now();
+    const result = await client.query(`SELECT * FROM "${tableName}" LIMIT $1`, [limit]);
+    const executionTime = Date.now() - startTime;
+
+    return res.status(200).json({
+      success: true,
+      rows: result.rows,
+      rowCount: result.rows.length,
+      executionTime,
+    });
+  } catch (error) {
+    console.error('Error getting PostgreSQL table data:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  } finally {
+    if (client) {
+      try {
+        await client.end();
+      } catch (e) {
+        console.error('Error closing pg client:', e);
+      }
+    }
   }
 });
 
