@@ -48,8 +48,8 @@ export class GatewayClient {
       }
 
       // Handle object-wrapped array response (e.g., { "publishers": [...] })
-      if (data && Array.isArray(data.providers)) {
-        return data.providers;
+      if (data && Array.isArray(data.publishers)) {
+        return data.publishers;
       }
 
       // If the response is not in a known format, return an empty array
@@ -77,7 +77,7 @@ export class GatewayClient {
    * Get detailed pricing configuration for a specific publisher
    */
   async getPublisherPricing(publisherId: string): Promise<PublisherPricingConfig> {
-    const response = await fetch(`${this.baseUrl}/api/providers/${publisherId}/pricing`);
+    const response = await fetch(`${this.baseUrl}/api/publishers/${publisherId}/pricing`);
 
     if (!response.ok) {
       if (response.status === 404) {
