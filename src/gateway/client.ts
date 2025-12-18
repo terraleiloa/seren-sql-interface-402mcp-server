@@ -209,7 +209,7 @@ export class GatewayClient {
   }
 
   /**
-   * Confirm a USDC deposit to credit balance
+   * Confirm a USDC deposit to credit balance (legacy flow)
    */
   async confirmDeposit(
     agentWallet: string,
@@ -237,6 +237,61 @@ export class GatewayClient {
     }
 
     return response.json() as Promise<CreditBalance>;
+  }
+
+  /**
+   * Deposit credits via x402 payment flow (returns 402 with requirements, or success)
+   */
+  async depositCredits(
+    amount: string,
+    paymentPayload?: PaymentPayload
+  ): Promise<{
+    status: number;
+    data?: {
+      message: string;
+      deposited: string;
+      balance: CreditBalance;
+      transaction: string;
+    };
+    paymentRequired?: PaymentRequirementsResponse;
+  }> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (paymentPayload) {
+      headers['X-PAYMENT'] = this.encodePaymentPayload(paymentPayload);
+    }
+
+    const response = await fetch(`${this.baseUrl}/api/credits/deposit`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ amount }),
+    });
+
+    if (response.status === 402) {
+      const paymentRequired = await response.json() as PaymentRequirementsResponse;
+      return { status: 402, paymentRequired };
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorBody: { error?: string };
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch {
+        errorBody = { error: errorText || 'Unknown error' };
+      }
+      throw new Error(`Deposit failed: ${errorBody.error ?? response.status}`);
+    }
+
+    const data = await response.json() as {
+      message: string;
+      deposited: string;
+      balance: CreditBalance;
+      transaction: string;
+    };
+    return { status: 200, data };
   }
 
   /**

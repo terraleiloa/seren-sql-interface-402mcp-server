@@ -414,7 +414,7 @@ server.registerTool(
 server.registerTool(
   'deposit_credits',
   {
-    description: 'Get instructions for depositing USDC to your prepaid credit balance. Returns the gateway deposit address and step-by-step instructions.',
+    description: 'Deposit USDC to your prepaid credit balance via x402 payment flow. Signs and submits the payment automatically.',
     inputSchema: z.object({
       amount: z.string().describe('Amount of USDC to deposit (e.g., "10.00")'),
     }),
@@ -431,11 +431,9 @@ server.registerTool(
               type: 'text' as const,
               text: JSON.stringify({
                 success: true,
-                instructions: result.instructions,
-                steps: result.steps,
-                amount: result.amount,
-                gatewayWallet: result.gatewayWallet,
-                agentWallet: result.agentWallet,
+                deposited: result.deposited,
+                balance: result.balance,
+                txHash: result.txHash,
               }, null, 2),
             },
           ],
