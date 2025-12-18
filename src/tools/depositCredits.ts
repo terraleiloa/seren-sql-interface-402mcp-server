@@ -19,9 +19,6 @@ export interface DepositCreditsOutput {
   error?: string;
 }
 
-// Gateway wallet address for USDC deposits on Base
-const GATEWAY_DEPOSIT_WALLET = '0x1234567890123456789012345678901234567890'; // TODO: Get from gateway config
-
 /**
  * Get instructions for depositing USDC to prepaid credit balance
  */
@@ -30,6 +27,14 @@ export async function depositCredits(
   wallet: WalletProvider,
   _gateway: GatewayClient
 ): Promise<DepositCreditsOutput> {
+  // Check if deposit wallet is configured
+  if (!config.GATEWAY_DEPOSIT_WALLET) {
+    return {
+      success: false,
+      error: 'Deposit wallet not configured. Set GATEWAY_DEPOSIT_WALLET environment variable.',
+    };
+  }
+
   // Validate amount
   const validationError = validateAmount(input.amount);
   if (validationError) {
@@ -38,23 +43,24 @@ export async function depositCredits(
 
   try {
     const agentWallet = await wallet.getAddress();
+    const depositWallet = config.GATEWAY_DEPOSIT_WALLET;
 
     const steps = [
       `1. Open your USDC wallet on Base network`,
-      `2. Send ${input.amount} USDC to the gateway deposit address: ${GATEWAY_DEPOSIT_WALLET}`,
+      `2. Send ${input.amount} USDC to the gateway deposit address: ${depositWallet}`,
       `3. Wait for the transaction to be confirmed on Base`,
-      `4. The gateway will automatically credit your balance once confirmed`,
+      `4. Use confirm_deposit with your transaction hash to credit your balance`,
       `5. Use check_credit_balance to verify your new balance`,
     ];
 
-    const instructions = `To deposit ${input.amount} USDC to your prepaid credit balance:\n\n${steps.join('\n')}\n\nNote: Deposits are processed automatically once the on-chain transaction is confirmed.`;
+    const instructions = `To deposit ${input.amount} USDC to your prepaid credit balance:\n\n${steps.join('\n')}\n\nIMPORTANT: After sending USDC, you must call confirm_deposit with your transaction hash to credit your balance.`;
 
     return {
       success: true,
       instructions,
       steps,
       amount: input.amount,
-      gatewayWallet: GATEWAY_DEPOSIT_WALLET,
+      gatewayWallet: depositWallet,
       agentWallet,
     };
   } catch (error) {

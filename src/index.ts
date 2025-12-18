@@ -13,6 +13,7 @@ import { getPublisherDetails } from './tools/getPublisherDetails.js';
 import { getPublisherPricingDetails } from './tools/getPublisherPricingDetails.js';
 import { checkCreditBalance } from './tools/checkCreditBalance.js';
 import { depositCredits } from './tools/depositCredits.js';
+import { confirmDeposit } from './tools/confirmDeposit.js';
 import { GatewayClient } from './gateway/client.js';
 import { PrivateKeyWalletProvider } from './wallet/privatekey.js';
 import type { WalletProvider } from './wallet/types.js';
@@ -435,6 +436,67 @@ server.registerTool(
                 amount: result.amount,
                 gatewayWallet: result.gatewayWallet,
                 agentWallet: result.agentWallet,
+              }, null, 2),
+            },
+          ],
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                error: result.error,
+              }, null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Register confirm_deposit tool
+server.registerTool(
+  'confirm_deposit',
+  {
+    description: 'Confirm a USDC deposit and credit your prepaid balance. Call this after sending USDC to the gateway deposit address with your transaction hash.',
+    inputSchema: z.object({
+      txHash: z.string().describe('The transaction hash of your USDC transfer (0x followed by 64 hex characters)'),
+      amount: z.string().describe('Amount of USDC deposited (e.g., "10.00")'),
+    }),
+  },
+  async (args) => {
+    try {
+      const wallet = await getWalletProvider();
+      const result = await confirmDeposit(args, wallet, gatewayClient);
+
+      if (result.success) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: true,
+                wallet: result.wallet,
+                balance: result.balance,
+                reserved: result.reserved,
+                available: result.available,
               }, null, 2),
             },
           ],
