@@ -3,6 +3,7 @@
 
 import { GatewayClient } from '../../src/gateway/client.js';
 import type { PaymentPayload } from '../../src/gateway/types.js';
+import { isInsufficientCreditError } from '../../src/gateway/types.js';
 
 describe('GatewayClient', () => {
   let client: GatewayClient;
@@ -143,5 +144,84 @@ describe('GatewayClient', () => {
       const decoded = client.decodePaymentResponse(encoded);
       expect(decoded).toEqual(payload);
     });
+  });
+});
+
+describe('isInsufficientCreditError', () => {
+  it('should return true for valid insufficient credit error', () => {
+    const error = {
+      error: 'Insufficient credit balance',
+      minimumRequired: '1.00',
+      depositEndpoint: '/api/credits/confirm-deposit',
+    };
+    expect(isInsufficientCreditError(error)).toBe(true);
+  });
+
+  it('should return true with different error message', () => {
+    const error = {
+      error: 'Not enough credits',
+      minimumRequired: '5.50',
+      depositEndpoint: '/api/credits/confirm-deposit',
+    };
+    expect(isInsufficientCreditError(error)).toBe(true);
+  });
+
+  it('should return false for standard x402 PaymentRequirementsResponse', () => {
+    const paymentRequired = {
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: 'exact',
+          network: 'base-mainnet',
+          maxAmountRequired: '1000000',
+          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          payTo: '0x1234567890123456789012345678901234567890',
+          resource: '/api/data',
+          description: 'Data access',
+          mimeType: 'application/json',
+          outputSchema: null,
+          maxTimeoutSeconds: 60,
+        },
+      ],
+    };
+    expect(isInsufficientCreditError(paymentRequired)).toBe(false);
+  });
+
+  it('should return false for null', () => {
+    expect(isInsufficientCreditError(null)).toBe(false);
+  });
+
+  it('should return false for undefined', () => {
+    expect(isInsufficientCreditError(undefined)).toBe(false);
+  });
+
+  it('should return false for non-object', () => {
+    expect(isInsufficientCreditError('string')).toBe(false);
+    expect(isInsufficientCreditError(123)).toBe(false);
+    expect(isInsufficientCreditError(true)).toBe(false);
+  });
+
+  it('should return false if missing error field', () => {
+    const partial = {
+      minimumRequired: '1.00',
+      depositEndpoint: '/api/credits/confirm-deposit',
+    };
+    expect(isInsufficientCreditError(partial)).toBe(false);
+  });
+
+  it('should return false if missing minimumRequired field', () => {
+    const partial = {
+      error: 'Insufficient credit balance',
+      depositEndpoint: '/api/credits/confirm-deposit',
+    };
+    expect(isInsufficientCreditError(partial)).toBe(false);
+  });
+
+  it('should return false if missing depositEndpoint field', () => {
+    const partial = {
+      error: 'Insufficient credit balance',
+      minimumRequired: '1.00',
+    };
+    expect(isInsufficientCreditError(partial)).toBe(false);
   });
 });

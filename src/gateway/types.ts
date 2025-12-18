@@ -98,3 +98,31 @@ export interface QueryResult {
     network: string;
   };
 }
+
+export interface CreditBalance {
+  agentWallet: string;
+  balance: string;
+  reserved: string;
+  available: string;
+}
+
+export interface InsufficientCreditError {
+  error: string;
+  minimumRequired: string;
+  depositEndpoint: string;
+}
+
+/**
+ * Type guard to detect insufficient credit 402 responses
+ */
+export function isInsufficientCreditError(value: unknown): value is InsufficientCreditError {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.error === 'string' &&
+    typeof obj.minimumRequired === 'string' &&
+    typeof obj.depositEndpoint === 'string'
+  );
+}
