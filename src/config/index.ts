@@ -14,9 +14,6 @@ const configSchema = z.object({
   WALLET_TYPE: z.enum(['browser', 'walletconnect', 'hardware']).default('browser'),
   WALLETCONNECT_PROJECT_ID: z.string().optional(),
 
-  // Prepaid credits deposit wallet (optional - must be configured to use deposit_credits)
-  GATEWAY_DEPOSIT_WALLET: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
-
   // Direct RPC - only needed for balance checks, not settlement
   // Settlement is handled by the gateway
   BASE_RPC_URL: z.string().url().default('https://mainnet.base.org'),
