@@ -10,6 +10,7 @@ import type {
   ProxyRequest,
   QueryRequest,
   QueryResult,
+  CreditBalance,
 } from './types.js';
 
 export class GatewayClient {
@@ -189,6 +190,53 @@ export class GatewayClient {
     const paymentResponse = response.headers.get('X-PAYMENT-RESPONSE') ?? undefined;
 
     return { status: 200, data, paymentResponse };
+  }
+
+  /**
+   * Get credit balance for an agent wallet
+   */
+  async getCreditBalance(agentWallet: string): Promise<CreditBalance> {
+    const response = await fetch(`${this.baseUrl}/api/credits/${agentWallet}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Credit balance not found');
+      }
+      throw new Error(`Failed to get credit balance: ${response.status}`);
+    }
+
+    return response.json() as Promise<CreditBalance>;
+  }
+
+  /**
+   * Confirm a USDC deposit to credit balance
+   */
+  async confirmDeposit(
+    agentWallet: string,
+    txHash: string,
+    amount: string
+  ): Promise<CreditBalance> {
+    const response = await fetch(`${this.baseUrl}/api/credits/confirm-deposit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentWallet, txHash, amount }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorBody: { error?: string };
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch {
+        errorBody = { error: errorText || 'Unknown error' };
+      }
+      if (errorBody.error) {
+        throw new Error(errorBody.error);
+      }
+      throw new Error(`Failed to confirm deposit: ${response.status}`);
+    }
+
+    return response.json() as Promise<CreditBalance>;
   }
 
   /**
