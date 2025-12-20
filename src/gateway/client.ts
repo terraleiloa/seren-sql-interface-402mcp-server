@@ -132,7 +132,10 @@ export class GatewayClient {
       } catch {
         errorBody = { error: errorText || 'Unknown error' };
       }
-      throw new Error(`Proxy request failed: ${errorBody.error ?? response.status}`);
+      const errorMessage = typeof errorBody.error === 'string'
+        ? errorBody.error
+        : JSON.stringify(errorBody.error) ?? response.status;
+      throw new Error(`Proxy request failed: ${errorMessage}`);
     }
 
     const data = await response.json();
