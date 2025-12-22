@@ -16,7 +16,6 @@ Use `npx` to pull the published server package on demand—no git clone or globa
 X402_GATEWAY_URL=https://x402.serendb.com \
 WALLET_PRIVATE_KEY=0xYOUR_KEY \
 BASE_RPC_URL=https://mainnet.base.org \
-SERENDB_CONNECTION_STRING=postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require \
 npx @serendb/x402-mcp-server
 ```
 
@@ -36,10 +35,7 @@ Create `.env` file:
 X402_GATEWAY_URL=https://x402.serendb.com
 WALLET_PRIVATE_KEY=0x...  # For PrivateKeyWalletProvider
 BASE_RPC_URL=https://mainnet.base.org
-SERENDB_CONNECTION_STRING=postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require
 ```
-
-Find your connection string in the [SerenDB Console](https://console.serendb.com) under your database settings.
 
 When using the quick `npx` flow you can also export or prefix these variables inline instead of maintaining a `.env` file, for example:
 
@@ -47,7 +43,6 @@ When using the quick `npx` flow you can also export or prefix these variables in
 export X402_GATEWAY_URL=https://x402.serendb.com
 export WALLET_PRIVATE_KEY=0x...
 export BASE_RPC_URL=https://mainnet.base.org
-export SERENDB_CONNECTION_STRING="postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
 npx @serendb/x402-mcp-server
 ```
 
@@ -66,15 +61,12 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
       "env": {
         "X402_GATEWAY_URL": "https://x402.serendb.com",
         "WALLET_PRIVATE_KEY": "0x...",
-        "BASE_RPC_URL": "https://mainnet.base.org",
-        "SERENDB_CONNECTION_STRING": "postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
+        "BASE_RPC_URL": "https://mainnet.base.org"
       }
     }
   }
 }
 ```
-
-Find your connection string in the [SerenDB Console](https://console.serendb.com) under your database settings.
 
 `npx` will fetch the published server automatically, so you only need Node.js and npm installed—no repo checkout or manual build.
 
@@ -109,7 +101,6 @@ args = ["@serendb/x402-mcp-server"]
 X402_GATEWAY_URL = "https://x402.serendb.com"
 WALLET_PRIVATE_KEY = "0x..."
 BASE_RPC_URL = "https://mainnet.base.org"
-SERENDB_CONNECTION_STRING = "postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
 ```
 
 Verify with `codex mcp list`. The same configuration file is shared between Codex CLI and the Codex VS Code extension.
@@ -133,8 +124,7 @@ Or edit `~/.gemini/settings.json` manually:
       "env": {
         "X402_GATEWAY_URL": "https://x402.serendb.com",
         "WALLET_PRIVATE_KEY": "$WALLET_PRIVATE_KEY",
-        "BASE_RPC_URL": "https://mainnet.base.org",
-        "SERENDB_CONNECTION_STRING": "postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
+        "BASE_RPC_URL": "https://mainnet.base.org"
       }
     }
   }
@@ -164,8 +154,7 @@ Then configure Cursor to use the global installation:
       "env": {
         "X402_GATEWAY_URL": "https://x402.serendb.com",
         "WALLET_PRIVATE_KEY": "0x...",
-        "BASE_RPC_URL": "https://mainnet.base.org",
-        "SERENDB_CONNECTION_STRING": "postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
+        "BASE_RPC_URL": "https://mainnet.base.org"
       }
     }
   }
@@ -183,8 +172,7 @@ Alternatively, if you have the repository cloned locally, point directly to the 
       "env": {
         "X402_GATEWAY_URL": "https://x402.serendb.com",
         "WALLET_PRIVATE_KEY": "0x...",
-        "BASE_RPC_URL": "https://mainnet.base.org",
-        "SERENDB_CONNECTION_STRING": "postgresql://serendb_owner:<password>@ep-<endpoint>.serendb.com/serendb?sslmode=require&channel_binding=require"
+        "BASE_RPC_URL": "https://mainnet.base.org"
       }
     }
   }
