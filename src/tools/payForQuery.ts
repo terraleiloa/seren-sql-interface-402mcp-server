@@ -8,6 +8,7 @@ import { isInsufficientCreditError } from '../gateway/types.js';
 import { UserRejectedError } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
 import { formatUsdc } from '../utils/usdc.js';
+import { truncateResponse } from '../utils/truncate.js';
 
 export interface PayForQueryInput {
   publisher_id: string;
@@ -25,6 +26,8 @@ export interface PayForQueryOutput {
   cost?: string;
   txHash?: string;
   error?: string;
+  truncated?: boolean;
+  originalSizeBytes?: number;
 }
 
 /**
@@ -64,9 +67,12 @@ export async function payForQuery(
 
     // If not 402, something is wrong or no payment needed
     if (initialResult.status !== 402 || !initialResult.paymentRequired) {
+      const truncated = truncateResponse(initialResult.data);
       return {
         success: true,
-        data: initialResult.data,
+        data: truncated.data,
+        truncated: truncated.truncated || undefined,
+        originalSizeBytes: truncated.originalSizeBytes,
       };
     }
 
@@ -156,11 +162,14 @@ export async function payForQuery(
       .reduce<bigint>((sum, requirement) => sum + BigInt(requirement.maxAmountRequired), 0n)
       .toString();
 
+    const truncatedResult = truncateResponse(paidResult.data);
     return {
       success: true,
-      data: paidResult.data,
+      data: truncatedResult.data,
       cost: formatUsdc(totalCostAtomic),
       txHash,
+      truncated: truncatedResult.truncated || undefined,
+      originalSizeBytes: truncatedResult.originalSizeBytes,
     };
   } catch (error) {
     if (error instanceof UserRejectedError) {

@@ -58,7 +58,7 @@ async function getWalletProvider(): Promise<WalletProvider> {
 server.registerTool(
   'pay_for_query',
   {
-    description: 'Execute a paid query against an x402-protected data publisher. Makes a request, handles the 402 payment flow, and returns the result.',
+    description: 'Execute a paid query against an x402-protected data publisher. Makes a request, handles the 402 payment flow, and returns the result. Large responses are automatically truncated to ~32k chars (~8k tokens) to prevent context overflow.',
     inputSchema: z.object({
       publisher_id: z.string().describe('UUID of the data publisher'),
       request: z.object({
@@ -84,6 +84,8 @@ server.registerTool(
                 data: result.data,
                 cost: result.cost,
                 txHash: result.txHash,
+                truncated: result.truncated,
+                originalSizeBytes: result.originalSizeBytes,
               }, null, 2),
             },
           ],
@@ -123,7 +125,7 @@ server.registerTool(
 server.registerTool(
   'query_database',
   {
-    description: 'Execute a paid SQL query against a database-type x402-protected publisher. Makes a query request, handles the 402 payment flow with row-based pricing, and returns the results.',
+    description: 'Execute a paid SQL query against a database-type x402-protected publisher. Makes a query request, handles the 402 payment flow with row-based pricing, and returns the results. Large responses are automatically truncated to ~32k chars (~8k tokens) to prevent context overflow.',
     inputSchema: z.object({
       publisher_id: z.string().describe('UUID of the database publisher'),
       sql: z.string().describe('SQL SELECT query to execute'),
@@ -147,6 +149,8 @@ server.registerTool(
                 actualCost: result.actualCost,
                 executionTime: result.executionTime,
                 txHash: result.txHash,
+                truncated: result.truncated,
+                originalSizeBytes: result.originalSizeBytes,
               }, null, 2),
             },
           ],

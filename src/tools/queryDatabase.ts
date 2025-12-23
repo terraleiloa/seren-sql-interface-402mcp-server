@@ -8,6 +8,7 @@ import { isInsufficientCreditError } from '../gateway/types.js';
 import { UserRejectedError } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
 import { formatUsdc } from '../utils/usdc.js';
+import { truncateResponse } from '../utils/truncate.js';
 
 export interface QueryDatabaseInput {
   publisher_id: string;
@@ -23,6 +24,8 @@ export interface QueryDatabaseOutput {
   executionTime?: number;
   txHash?: string;
   error?: string;
+  truncated?: boolean;
+  originalSizeBytes?: number;
 }
 
 /**
@@ -59,13 +62,16 @@ export async function queryDatabase(
     if (initialResult.status !== 402 || !initialResult.paymentRequired) {
       // This shouldn't happen for database queries, but handle it
       if (initialResult.data) {
+        const truncated = truncateResponse(initialResult.data.rows);
         return {
           success: true,
-          rows: initialResult.data.rows,
+          rows: truncated.data as unknown[],
           rowCount: initialResult.data.rowCount,
           estimatedCost: initialResult.data.estimatedCost,
           actualCost: initialResult.data.actualCost,
           executionTime: initialResult.data.executionTime,
+          truncated: truncated.truncated || undefined,
+          originalSizeBytes: truncated.originalSizeBytes,
         };
       }
       return { success: false, error: 'Unexpected response from gateway' };
@@ -126,14 +132,17 @@ export async function queryDatabase(
       txHash = paymentResponse.transaction;
     }
 
+    const truncatedResult = truncateResponse(paidResult.data.rows);
     return {
       success: true,
-      rows: paidResult.data.rows,
+      rows: truncatedResult.data as unknown[],
       rowCount: paidResult.data.rowCount,
       estimatedCost: paidResult.data.estimatedCost,
       actualCost: paidResult.data.actualCost,
       executionTime: paidResult.data.executionTime,
       txHash,
+      truncated: truncatedResult.truncated || undefined,
+      originalSizeBytes: truncatedResult.originalSizeBytes,
     };
   } catch (error) {
     if (error instanceof UserRejectedError) {
