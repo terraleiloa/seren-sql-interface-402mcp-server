@@ -1,8 +1,8 @@
 // ABOUTME: MCP tool to list available x402-protected data publishers
-// ABOUTME: Wraps GatewayClient.listPublishers() with optional filtering
+// ABOUTME: Returns compact summaries to reduce context usage
 
 import type { GatewayClient } from '../gateway/client.js';
-import type { Publisher } from '../gateway/types.js';
+import type { Publisher, PublisherSummary } from '../gateway/types.js';
 
 export interface ListPublishersInput {
   category?: string;
@@ -11,8 +11,21 @@ export interface ListPublishersInput {
 
 export interface ListPublishersOutput {
   success: boolean;
-  publishers?: Publisher[];
+  publishers?: PublisherSummary[];
   error?: string;
+}
+
+/**
+ * Convert a full Publisher to a compact PublisherSummary
+ */
+export function toPublisherSummary(publisher: Publisher): PublisherSummary {
+  return {
+    id: publisher.id,
+    name: publisher.name,
+    type: publisher.publisherType,
+    categories: publisher.categories,
+    description: publisher.resourceDescription,
+  };
 }
 
 /**
@@ -33,10 +46,11 @@ export async function listPublishers(
     }
 
     const publishers = await gateway.listPublishers(filters);
+    const summaries = publishers.map(toPublisherSummary);
 
     return {
       success: true,
-      publishers,
+      publishers: summaries,
     };
   } catch (error) {
     return {

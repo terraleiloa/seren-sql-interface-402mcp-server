@@ -186,7 +186,7 @@ server.registerTool(
 server.registerTool(
   'list_publishers',
   {
-    description: 'List available x402-protected data publishers from the gateway catalog. Optionally filter by category or publisher type.',
+    description: 'List available x402-protected data publishers from the gateway catalog. Returns compact summaries (id, name, type, categories, description). Use get_publisher_details to get full info including usageExample for a specific publisher.',
     inputSchema: z.object({
       category: z.string().optional().describe('Filter by category (e.g., "finance", "analytics")'),
       type: z.enum(['database', 'api', 'both']).optional().describe('Filter by publisher type'),
@@ -244,7 +244,7 @@ server.registerTool(
 server.registerTool(
   'get_publisher_details',
   {
-    description: 'Get detailed information about a specific x402-protected data publisher including pricing, endpoints, and capabilities.',
+    description: 'Get detailed information about a specific x402-protected data publisher including pricing, endpoints, capabilities, and usageExample. Use this after list_publishers to get full details for a publisher you want to query.',
     inputSchema: z.object({
       publisher_id: z.string().describe('UUID of the data publisher'),
     }),

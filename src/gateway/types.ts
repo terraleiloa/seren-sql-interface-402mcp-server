@@ -65,6 +65,18 @@ export interface Publisher {
   pricePerCall?: string;
   categories?: string[];
   upstreamApiUrl?: string;
+  usageExample?: string;
+}
+
+/**
+ * Compact publisher info for list responses (reduces context usage)
+ */
+export interface PublisherSummary {
+  id: string;
+  name: string;
+  type: 'database' | 'api' | 'both';
+  categories?: string[];
+  description?: string;
 }
 
 export interface ProxyRequest {

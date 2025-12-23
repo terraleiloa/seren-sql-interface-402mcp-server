@@ -2,9 +2,54 @@
 // ABOUTME: Tests input validation, gateway communication, and response formatting
 
 import { jest } from '@jest/globals';
-import { listPublishers, ListPublishersInput } from '../../src/tools/listPublishers.js';
+import { listPublishers, toPublisherSummary, ListPublishersInput } from '../../src/tools/listPublishers.js';
 import { getPublisherDetails, GetPublisherDetailsInput } from '../../src/tools/getPublisherDetails.js';
 import type { GatewayClient } from '../../src/gateway/client.js';
+import type { Publisher } from '../../src/gateway/types.js';
+
+describe('toPublisherSummary', () => {
+  it('should convert full Publisher to compact summary', () => {
+    const fullPublisher: Publisher = {
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'Test Publisher',
+      resourceName: 'test-resource',
+      resourceDescription: 'A detailed description',
+      publisherType: 'api',
+      pricePerCall: '0.01',
+      categories: ['finance', 'testing'],
+      upstreamApiUrl: 'https://api.example.com',
+      usageExample: 'GET /prices?coin=bitcoin',
+    };
+
+    const summary = toPublisherSummary(fullPublisher);
+
+    expect(summary.id).toBe('123e4567-e89b-12d3-a456-426614174000');
+    expect(summary.name).toBe('Test Publisher');
+    expect(summary.type).toBe('api');
+    expect(summary.categories).toEqual(['finance', 'testing']);
+    expect(summary.description).toBe('A detailed description');
+    // Verify excluded fields are not present
+    expect((summary as Record<string, unknown>).pricePerCall).toBeUndefined();
+    expect((summary as Record<string, unknown>).usageExample).toBeUndefined();
+    expect((summary as Record<string, unknown>).upstreamApiUrl).toBeUndefined();
+  });
+
+  it('should handle missing optional fields', () => {
+    const minimalPublisher: Publisher = {
+      id: 'min-id',
+      name: 'Minimal',
+      publisherType: 'database',
+    };
+
+    const summary = toPublisherSummary(minimalPublisher);
+
+    expect(summary.id).toBe('min-id');
+    expect(summary.name).toBe('Minimal');
+    expect(summary.type).toBe('database');
+    expect(summary.categories).toBeUndefined();
+    expect(summary.description).toBeUndefined();
+  });
+});
 
 describe('listPublishers', () => {
   let mockGateway: jest.Mocked<GatewayClient>;
@@ -37,12 +82,22 @@ describe('listPublishers', () => {
   });
 
   describe('without filters', () => {
-    it('should return all publishers', async () => {
+    it('should return all publishers as summaries', async () => {
       const result = await listPublishers({}, mockGateway);
 
       expect(result.success).toBe(true);
       expect(result.publishers).toHaveLength(2);
       expect(mockGateway.listPublishers).toHaveBeenCalledWith({});
+
+      // Verify summaries have correct fields
+      const first = result.publishers![0];
+      expect(first.id).toBe('123e4567-e89b-12d3-a456-426614174000');
+      expect(first.name).toBe('Test Publisher 1');
+      expect(first.type).toBe('api');
+      expect(first.categories).toEqual(['finance']);
+      // Verify excluded fields are not in summary
+      expect((first as Record<string, unknown>).pricePerCall).toBeUndefined();
+      expect((first as Record<string, unknown>).publisherType).toBeUndefined();
     });
   });
 
