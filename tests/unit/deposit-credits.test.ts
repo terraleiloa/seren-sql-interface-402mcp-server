@@ -28,7 +28,7 @@ describe('depositCredits', () => {
   beforeEach(() => {
     mockWallet = {
       getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
-      signTypedData: jest.fn(),
+      signTypedData: jest.fn().mockResolvedValue('0xmocksignature'),
       isConnected: jest.fn().mockResolvedValue(true),
       connect: jest.fn(),
       disconnect: jest.fn(),
@@ -37,6 +37,7 @@ describe('depositCredits', () => {
     mockGateway = {
       getCreditBalance: jest.fn(),
       confirmDeposit: jest.fn(),
+      depositCredits: jest.fn(),
       listPublishers: jest.fn(),
       getPublisher: jest.fn(),
       proxyRequest: jest.fn(),
@@ -45,38 +46,93 @@ describe('depositCredits', () => {
     } as unknown as jest.Mocked<GatewayClient>;
   });
 
-  describe('deposit instructions', () => {
-    it('should return deposit instructions with gateway wallet address', async () => {
+  describe('successful deposit flow', () => {
+    it('should complete deposit when gateway returns 402 then success', async () => {
+      // First call returns 402 with payment requirements
+      mockGateway.depositCredits
+        .mockResolvedValueOnce({
+          status: 402,
+          paymentRequired: {
+            x402Version: 1,
+            accepts: [{
+              scheme: 'exact',
+              network: 'base',
+              maxAmountRequired: '10000000',
+              asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              payTo: '0xGatewayWallet',
+              resource: '/deposit',
+              description: 'Deposit',
+              mimeType: 'application/json',
+              outputSchema: null,
+              maxTimeoutSeconds: 300,
+            }],
+          },
+        })
+        // Second call (with payment) returns success
+        .mockResolvedValueOnce({
+          status: 200,
+          data: {
+            deposited: '10.00',
+            balance: {
+              agentWallet: '0x1234567890123456789012345678901234567890',
+              balance: '10.00',
+              reserved: '0.00',
+              available: '10.00',
+            },
+            transaction: '0xTxHash123',
+          },
+        });
+
       const input: DepositCreditsInput = { amount: '10.00' };
       const result = await depositCredits(input, mockWallet, mockGateway);
 
       expect(result.success).toBe(true);
-      expect(result.instructions).toBeDefined();
-      expect(result.amount).toBe('10.00');
-      expect(result.gatewayWallet).toBe('0xTestDepositWallet1234567890123456789012');
+      expect(result.deposited).toBe('10.00');
+      expect(result.balance?.available).toBe('10.00');
+      expect(result.txHash).toBe('0xTxHash123');
     });
 
-    it('should include step-by-step instructions', async () => {
+    it('should return balance info on successful deposit', async () => {
+      mockGateway.depositCredits
+        .mockResolvedValueOnce({
+          status: 402,
+          paymentRequired: {
+            x402Version: 1,
+            accepts: [{
+              scheme: 'exact',
+              network: 'base',
+              maxAmountRequired: '5000000',
+              asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              payTo: '0xGatewayWallet',
+              resource: '/deposit',
+              description: 'Deposit',
+              mimeType: 'application/json',
+              outputSchema: null,
+              maxTimeoutSeconds: 300,
+            }],
+          },
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          data: {
+            deposited: '5.00',
+            balance: {
+              agentWallet: '0x1234567890123456789012345678901234567890',
+              balance: '15.00',
+              reserved: '2.00',
+              available: '13.00',
+            },
+            transaction: '0xTxHash456',
+          },
+        });
+
       const input: DepositCreditsInput = { amount: '5.00' };
       const result = await depositCredits(input, mockWallet, mockGateway);
 
       expect(result.success).toBe(true);
-      expect(result.steps).toBeDefined();
-      expect(result.steps?.length).toBeGreaterThan(0);
-    });
-
-    it('should include agent wallet address in instructions', async () => {
-      const input: DepositCreditsInput = { amount: '10.00' };
-      const result = await depositCredits(input, mockWallet, mockGateway);
-
-      expect(result.agentWallet).toBe('0x1234567890123456789012345678901234567890');
-    });
-
-    it('should mention confirm_deposit in instructions', async () => {
-      const input: DepositCreditsInput = { amount: '10.00' };
-      const result = await depositCredits(input, mockWallet, mockGateway);
-
-      expect(result.instructions).toContain('confirm_deposit');
+      expect(result.balance).toBeDefined();
+      expect(result.balance?.balance).toBe('15.00');
+      expect(result.balance?.available).toBe('13.00');
     });
   });
 
@@ -119,25 +175,8 @@ describe('depositCredits', () => {
   });
 });
 
-describe('depositCredits without config', () => {
-  it('should fail when GATEWAY_DEPOSIT_WALLET is not configured', async () => {
-    // Reset modules to test without config
-    jest.resetModules();
-
-    // Mock config without GATEWAY_DEPOSIT_WALLET
-    jest.unstable_mockModule('../../src/config/index.js', () => ({
-      config: {
-        GATEWAY_DEPOSIT_WALLET: undefined,
-        X402_GATEWAY_URL: 'https://x402.serendb.com',
-        WALLET_TYPE: 'browser',
-        BASE_RPC_URL: 'https://mainnet.base.org',
-        NODE_ENV: 'test',
-        LOG_LEVEL: 'info',
-      },
-    }));
-
-    const { depositCredits: depositCreditsNoConfig } = await import('../../src/tools/depositCredits.js');
-
+describe('depositCredits error handling', () => {
+  it('should fail when gateway returns error', async () => {
     const mockWallet = {
       getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
       signTypedData: jest.fn(),
@@ -147,13 +186,56 @@ describe('depositCredits without config', () => {
     } as unknown as jest.Mocked<WalletProvider>;
 
     const mockGateway = {
-      getCreditBalance: jest.fn(),
-      confirmDeposit: jest.fn(),
+      depositCredits: jest.fn().mockRejectedValue(new Error('Gateway unavailable')),
     } as unknown as jest.Mocked<GatewayClient>;
 
-    const result = await depositCreditsNoConfig({ amount: '10.00' }, mockWallet, mockGateway);
+    const result = await depositCredits({ amount: '10.00' }, mockWallet, mockGateway);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Deposit wallet not configured');
+    expect(result.error).toContain('Gateway unavailable');
+  });
+
+  it('should fail when payment settlement fails', async () => {
+    const mockWallet = {
+      getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
+      signTypedData: jest.fn().mockResolvedValue('0xmocksignature'),
+      isConnected: jest.fn().mockResolvedValue(true),
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+    } as unknown as jest.Mocked<WalletProvider>;
+
+    const mockGateway = {
+      depositCredits: jest.fn()
+        .mockResolvedValueOnce({
+          status: 402,
+          paymentRequired: {
+            x402Version: 1,
+            accepts: [{
+              scheme: 'exact',
+              network: 'base',
+              maxAmountRequired: '10000000',
+              asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              payTo: '0xGatewayWallet',
+              resource: '/deposit',
+              description: 'Deposit',
+              mimeType: 'application/json',
+              outputSchema: null,
+              maxTimeoutSeconds: 300,
+            }],
+          },
+        })
+        // Second call returns 402 (settlement failed)
+        .mockResolvedValueOnce({
+          status: 402,
+          paymentRequired: {
+            error: 'Insufficient funds',
+          },
+        }),
+    } as unknown as jest.Mocked<GatewayClient>;
+
+    const result = await depositCredits({ amount: '10.00' }, mockWallet, mockGateway);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Insufficient funds');
   });
 });
