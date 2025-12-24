@@ -105,34 +105,6 @@ BASE_RPC_URL = "https://mainnet.base.org"
 
 Verify with `codex mcp list`. The same configuration file is shared between Codex CLI and the Codex VS Code extension.
 
-### Gemini CLI (Google)
-
-[Gemini CLI](https://github.com/google-gemini/gemini-cli) stores MCP configuration in `~/.gemini/settings.json`. Run this command to add the server:
-
-```bash
-gemini mcp add x402 -- npx @serendb/x402-mcp-server
-```
-
-Or edit `~/.gemini/settings.json` manually:
-
-```json
-{
-  "mcpServers": {
-    "x402": {
-      "command": "npx",
-      "args": ["@serendb/x402-mcp-server"],
-      "env": {
-        "X402_GATEWAY_URL": "https://x402.serendb.com",
-        "WALLET_PRIVATE_KEY": "$WALLET_PRIVATE_KEY",
-        "BASE_RPC_URL": "https://mainnet.base.org"
-      }
-    }
-  }
-}
-```
-
-Note: Gemini CLI supports `$VAR_NAME` syntax for environment variable references. Verify with `gemini mcp list`.
-
 ### Cursor
 
 Cursor supports MCP servers via either the global file `~/.cursor/mcp.json` (applies to every workspace) or a project-scoped `.cursor/mcp.json`. In Cursor go to Settings → Features → Model Context Protocol to manage entries visually, or edit the JSON manually.
