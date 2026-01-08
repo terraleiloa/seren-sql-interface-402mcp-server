@@ -9,6 +9,7 @@ import { UserRejectedError } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
 import { formatUsdc } from '../utils/usdc.js';
 import { truncateResponse } from '../utils/truncate.js';
+import { depositCredits } from './depositCredits.js';
 
 export interface PayForQueryInput {
   publisher_id: string;
@@ -28,6 +29,10 @@ export interface PayForQueryOutput {
   error?: string;
   truncated?: boolean;
   originalSizeBytes?: number;
+  depositInfo?: {
+    deposited: string;
+    txHash: string;
+  };
 }
 
 /**
@@ -77,11 +82,54 @@ export async function payForQuery(
     }
 
     // Check if this is an insufficient credit error (prepaid credits publisher)
+    // Auto-deposit the minimum required amount and retry the query
     if (isInsufficientCreditError(initialResult.paymentRequired)) {
       const creditError = initialResult.paymentRequired;
+
+      // Auto-deposit the minimum required amount
+      const depositResult = await depositCredits(
+        { amount: creditError.minimumRequired },
+        wallet,
+        gateway
+      );
+
+      if (!depositResult.success) {
+        return {
+          success: false,
+          error: `Auto-deposit failed: ${depositResult.error}. You need ${creditError.minimumRequired} USDC to use this publisher.`,
+        };
+      }
+
+      // Retry the original query after successful deposit
+      const retryResult = await gateway.proxyRequest({
+        publisherId: input.publisher_id,
+        agentWallet,
+        request: {
+          method: input.request.method ?? 'GET',
+          path: input.request.path,
+          body: input.request.body,
+          headers: input.request.headers,
+        },
+      });
+
+      // Handle retry result
+      if (retryResult.status === 402) {
+        const errorMsg =
+          (retryResult.paymentRequired as { error?: string })?.error ??
+          'Query failed after deposit - insufficient balance';
+        return { success: false, error: errorMsg };
+      }
+
+      const truncatedRetry = truncateResponse(retryResult.data);
       return {
-        success: false,
-        error: `Insufficient credit balance. Minimum required: ${creditError.minimumRequired} USDC. Please deposit funds to continue.`,
+        success: true,
+        data: truncatedRetry.data,
+        truncated: truncatedRetry.truncated || undefined,
+        originalSizeBytes: truncatedRetry.originalSizeBytes,
+        depositInfo: {
+          deposited: depositResult.deposited!,
+          txHash: depositResult.txHash!,
+        },
       };
     }
 
