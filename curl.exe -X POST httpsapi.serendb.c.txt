@@ -1,0 +1,80 @@
+curl.exe -X POST https://api.serendb.com/api/v1/publishers \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer seren_bmW3HDNqfa_Fv5eawzRFnEiFgOVeAHZkfqUSXakT4r4L8eV905a" \
+  -d '{
+    "name": "Sports Odds",
+    "description": "Sports: High-frequency access to live odds, scores, and markets.",
+    "category": "Sports & Betting Odds",
+    "defaultPrice": 0.005,
+    "walletAddress": "0xf3fcEa0bc160547E7551E382C28e7E4AbFFEB255",
+    "connectionString": "postgresql://serendb_owner:spg_KESAVgVyJVCiH3a3@ep-azure-aquila-9a35f2d8.c-1.us-east-1.serendb.com/serendb?sslmode=require",
+    "rateLimit": {
+      "requests": 300,
+      "period": "minute"
+    },
+
+    "cacheTTL": 10,
+    "upstream": {
+      "baseUrl": "https://api.the-odds-api.com/v4",
+      "auth": {
+        "type": "query_param",
+        "key": "apiKey",
+        "value": "a7fc95f8d36f8d9a9be48f071b4f5b2a"
+      }
+    },
+    "endpoints": [
+      { "path": "/sports", "method": "GET" },
+      { "path": "/sports/:sport/odds", "method": "GET" },
+      { "path": "/sports/:sport/scores", "method": "GET" },
+      { "path": "/sports/:sport/events", "method": "GET" },
+      { "path": "/sports/:sport/events/:eventId/odds", "method": "GET" },
+      { "path": "/sports/:sport/events/:eventId/markets", "method": "GET" },
+      { "path": "/sports/:sport/events/:eventId/participants", "method": "GET" }
+    ]
+  }'
+
+
+
+
+$headers = @{
+    "Content-Type"  = "application/json"
+    "Authorization" = "Bearer seren_bmW3HDNqfa_Fv5eawzRFnEiFgOVeAHZkfqUSXakT4r4L8eV905a"
+}
+
+$body = @{
+    name          = "Sports Odds"
+    description   = "Sports: High-frequency access to live odds, scores, and markets."
+    category      = "Sports & Betting Odds"
+    defaultPrice  = 0.005
+    walletAddress = "0xf3fcEa0bc160547E7551E382C28e7E4AbFFEB255"
+    connectionString = "postgresql://serendb_owner:spg_KESAVgVyJVCiH3a3@ep-azure-aquila-9a35f2d8.c-1.us-east-1.serendb.com/serendb?sslmode=require"
+    rateLimit     = @{
+        requests = 300
+        period   = "minute"
+    }
+    cacheTTL      = 10
+    upstream      = @{
+        baseUrl = "https://api.the-odds-api.com/v4"
+        auth    = @{
+            type  = "query_param"
+            key   = "apiKey"
+            value = "a7fc95f8d36f8d9a9be48f071b4f5b2a"
+        }
+    }
+    endpoints     = @(
+        @{ path = "/sports"; method = "GET" },
+        @{ path = "/sports/:sport/odds"; method = "GET" },
+        @{ path = "/sports/:sport/scores"; method = "GET" },
+        @{ path = "/sports/:sport/events"; method = "GET" },
+        @{ path = "/sports/:sport/events/:eventId/odds"; method = "GET" },
+        @{ path = "/sports/:sport/events/:eventId/markets"; method = "GET" },
+        @{ path = "/sports/:sport/events/:eventId/participants"; method = "GET" }
+    )
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Uri "https://x402.serendb.com/api/providers/register" `
+    -Method Post `
+    -Headers $headers `
+    -Body $body
+
+

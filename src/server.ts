@@ -13,7 +13,7 @@ const app = express();
 
 // Enable CORS for frontend
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));  // Increase limit for embedding payloads
 
 // Validate environment variables
 const privateKey = process.env.WALLET_PRIVATE_KEY;
@@ -43,6 +43,14 @@ const executeAdminSqlSchema = z.object({
   publisherId: z.string().optional(),
 });
 
+const proxyApiSchema = z.object({
+  publisherId: z.string().min(1, 'publisherId is required'),
+  method: z.enum(['GET', 'POST', 'PUT', 'DELETE']).default('GET'),
+  path: z.string().min(1, 'path is required'),
+  body: z.any().optional(),
+  headers: z.record(z.string()).optional(),
+});
+
 const executeDirectSqlSchema = z.object({
   sql: z.string().min(1, 'SQL query is required'),
   connectionString: z.string().min(1, 'Connection string is required'),
@@ -60,6 +68,26 @@ const sqliteExecuteSchema = z.object({
   sql: z.string().min(1, 'SQL query is required'),
   filePath: z.string().min(1, 'File path is required'),
 });
+
+/**
+ * Helper function to safely close a PostgreSQL client connection
+ * Ensures proper cleanup even if the client is in a partially connected state
+ * Safe to call even if the client failed to connect or is already closed
+ */
+async function closePostgresClient(client: pg.Client | null): Promise<void> {
+  if (!client) {
+    return;
+  }
+  
+  try {
+    // client.end() is safe to call even if connection failed or is already closed
+    // It will gracefully handle all states (not connected, connecting, connected, closing)
+    await client.end();
+  } catch (e) {
+    // Log error but don't throw - cleanup should never fail the request
+    console.error('Error closing pg client:', e);
+  }
+}
 
 /**
  * POST /api/execute-sql
@@ -153,13 +181,7 @@ app.post('/api/direct/execute', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
-    }
+    await closePostgresClient(client);
   }
 });
 
@@ -300,6 +322,60 @@ app.get('/api/admin/tables', async (req, res) => {
 });
 
 /**
+ * PATCH /api/admin/publisher/connection
+ * Update publisher connection string
+ */
+app.patch('/api/admin/publisher/connection', async (req, res) => {
+  try {
+    // Check if API key is configured
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Admin API key not configured. SEREN_API_KEY environment variable is required.',
+      });
+    }
+
+    // Validate request body
+    const updateSchema = z.object({
+      connectionString: z.string().min(1, 'Connection string is required'),
+    });
+
+    const validationResult = updateSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { connectionString } = validationResult.data;
+
+    // Update connection string using shared service
+    const result = await serenService.updatePublisherConnection(connectionString, apiKey);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        message: result.message || 'Connection string updated successfully',
+      });
+    } else {
+      const statusCode = result.error?.includes('authentication') || result.error?.includes('401') || result.error?.includes('403') ? 401 : 500;
+      return res.status(statusCode).json({
+        success: false,
+        error: result.error || 'Failed to update connection string',
+      });
+    }
+  } catch (error) {
+    console.error('Error updating publisher connection:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
  * GET /api/admin/tables/:name
  * Get schema details for a specific table
  */
@@ -343,6 +419,56 @@ app.get('/api/admin/tables/:name', async (req, res) => {
 });
 
 /**
+ * POST /api/proxy
+ * Execute a paid API request via x402 Gateway (for API-type publishers)
+ * Handles the full 402 payment flow: request -> 402 -> sign -> retry
+ */
+app.post('/api/proxy', async (req, res) => {
+  try {
+    // Validate request body
+    const validationResult = proxyApiSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { publisherId, method, path, body, headers } = validationResult.data;
+
+    // Execute API call using shared service
+    const result = await serenService.executeApiCall({
+      publisherId,
+      method,
+      path,
+      body,
+      headers,
+    });
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        data: result.data,
+        cost: result.cost,
+        txHash: result.txHash,
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'API call failed',
+      });
+    }
+  } catch (error) {
+    console.error('Error executing API proxy request:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
  * GET /api/providers
  * List available providers/publishers from the gateway catalog
  * Optional query params: category, type (database|api|both)
@@ -378,6 +504,105 @@ app.get('/api/providers', async (req, res) => {
   }
 });
 
+// ==================== Credit Management Endpoints ====================
+
+/**
+ * GET /api/wallet
+ * Get wallet address for the configured private key
+ */
+app.get('/api/wallet', async (req, res) => {
+  try {
+    const wallet = await serenService.getWalletProvider();
+    const address = await wallet.getAddress();
+
+    return res.status(200).json({
+      success: true,
+      address,
+    });
+  } catch (error) {
+    console.error('Error getting wallet address:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+/**
+ * GET /api/credits/balance
+ * Check prepaid credit balance for the wallet
+ */
+app.get('/api/credits/balance', async (req, res) => {
+  try {
+    const wallet = await serenService.getWalletProvider();
+    const walletAddress = await wallet.getAddress();
+    const gatewayClient = serenService.getGatewayClient();
+    const creditBalance = await gatewayClient.getCreditBalance(walletAddress);
+
+    return res.status(200).json({
+      success: true,
+      wallet: creditBalance.agentWallet,
+      balance: creditBalance.balance,
+      reserved: creditBalance.reserved,
+      available: creditBalance.available,
+    });
+  } catch (error) {
+    console.error('Error checking credit balance:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
+// Validation schema for deposit
+const depositSchema = z.object({
+  amount: z.string().min(1, 'amount is required'),
+});
+
+/**
+ * POST /api/credits/deposit
+ * Deposit USDC to prepaid credit balance
+ */
+app.post('/api/credits/deposit', async (req, res) => {
+  try {
+    // Validate request body
+    const validationResult = depositSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
+    }
+
+    const { amount } = validationResult.data;
+
+    // Execute deposit using shared service
+    const result = await serenService.depositCredits(amount);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        deposited: result.deposited,
+        balance: result.balance,
+        txHash: result.txHash,
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Deposit failed',
+      });
+    }
+  } catch (error) {
+    console.error('Error depositing credits:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+});
+
 /**
  * Helper function to get or create SQLite connection
  */
@@ -390,6 +615,38 @@ function getSqliteConnection(filePath: string): Database.Database {
     sqliteConnections.set(filePath, db);
   }
   return sqliteConnections.get(filePath)!;
+}
+
+/**
+ * Close a specific SQLite connection
+ */
+function closeSqliteConnection(filePath: string): void {
+  const db = sqliteConnections.get(filePath);
+  if (db) {
+    try {
+      db.close();
+      sqliteConnections.delete(filePath);
+      console.log(`Closed SQLite connection: ${filePath}`);
+    } catch (error) {
+      console.error(`Error closing SQLite connection ${filePath}:`, error);
+    }
+  }
+}
+
+/**
+ * Close all SQLite connections
+ */
+function closeAllSqliteConnections(): void {
+  console.log(`Closing ${sqliteConnections.size} SQLite connection(s)...`);
+  for (const [filePath, db] of sqliteConnections.entries()) {
+    try {
+      db.close();
+      console.log(`Closed SQLite connection: ${filePath}`);
+    } catch (error) {
+      console.error(`Error closing SQLite connection ${filePath}:`, error);
+    }
+  }
+  sqliteConnections.clear();
 }
 
 /**
@@ -448,8 +705,8 @@ app.post('/api/sqlite/execute', async (req, res) => {
     const startTime = Date.now();
     const stmt = db.prepare(sql);
 
-    let rows;
-    let rowCount;
+    let rows: unknown[];
+    let rowCount: number;
 
     // Determine if this is a SELECT query or a modification query
     const trimmedSql = sql.trim().toUpperCase();
@@ -663,13 +920,7 @@ app.get('/api/postgres/tables', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
-    }
+    await closePostgresClient(client);
   }
 });
 
@@ -750,13 +1001,7 @@ app.get('/api/postgres/schema/:table', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
-    }
+    await closePostgresClient(client);
   }
 });
 
@@ -816,13 +1061,7 @@ app.get('/api/postgres/indexes/:table', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
-    }
+    await closePostgresClient(client);
   }
 });
 
@@ -882,13 +1121,7 @@ app.get('/api/postgres/foreign-keys/:table', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
-    }
+    await closePostgresClient(client);
   }
 });
 
@@ -934,13 +1167,39 @@ app.get('/api/postgres/table-data/:table', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   } finally {
-    if (client) {
-      try {
-        await client.end();
-      } catch (e) {
-        console.error('Error closing pg client:', e);
-      }
+    await closePostgresClient(client);
+  }
+});
+
+/**
+ * DELETE /api/sqlite/close
+ * Close a specific SQLite connection
+ */
+app.delete('/api/sqlite/close', async (req, res) => {
+  try {
+    const validationResult = sqliteConnectSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request body',
+        details: validationResult.error.errors,
+      });
     }
+
+    const { filePath } = validationResult.data;
+    closeSqliteConnection(filePath);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Connection closed',
+      filePath,
+    });
+  } catch (error) {
+    console.error('Error closing SQLite connection:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
   }
 });
 
@@ -951,7 +1210,43 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Seren SQL API server running on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown handlers
+function gracefulShutdown(signal: string) {
+  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  // Close all SQLite connections
+  closeAllSqliteConnections();
+  
+  // Close the HTTP server
+  server.close(() => {
+    console.log('HTTP server closed.');
+    process.exit(0);
+  });
+  
+  // Force close after 10 seconds
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  closeAllSqliteConnections();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  // Don't exit on unhandled rejection, but log it
 });
 

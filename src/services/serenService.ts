@@ -5,12 +5,28 @@ import { GatewayClient } from '../gateway/client.js';
 import { PrivateKeyWalletProvider } from '../wallet/privatekey.js';
 import type { WalletProvider } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
-import type { PaymentPayload, PaymentRequirement, QueryResult, Publisher } from '../gateway/types.js';
+import type { PaymentPayload, PaymentRequirement, QueryResult, Publisher, CreditBalance } from '../gateway/types.js';
 import { UserRejectedError } from '../wallet/types.js';
 
 export interface ExecuteQueryParams {
   sql: string;
   providerId: string;
+}
+
+export interface ExecuteApiCallParams {
+  publisherId: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  path: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export interface ExecuteApiCallResult {
+  success: boolean;
+  data?: unknown;
+  cost?: string;
+  txHash?: string;
+  error?: string;
 }
 
 export interface ExecuteQueryResult {
@@ -46,9 +62,9 @@ export class SerenService {
   }
 
   /**
-   * Get or initialize the wallet provider
+   * Get or initialize the wallet provider (public for credit management)
    */
-  private async getWalletProvider(): Promise<WalletProvider> {
+  async getWalletProvider(): Promise<WalletProvider> {
     if (this.walletProvider) {
       return this.walletProvider;
     }
@@ -57,6 +73,112 @@ export class SerenService {
     await provider.connect(this.privateKey);
     this.walletProvider = provider;
     return provider;
+  }
+
+  /**
+   * Get the gateway client (public for credit management)
+   */
+  getGatewayClient(): GatewayClient {
+    return this.gatewayClient;
+  }
+
+  /**
+   * Deposit USDC to prepaid credit balance via x402 payment flow
+   * @param amount - Amount to deposit (e.g., "10.00" for 10 USDC)
+   * @returns Deposit result with balance and transaction hash
+   */
+  async depositCredits(amount: string): Promise<{
+    success: boolean;
+    deposited?: string;
+    balance?: CreditBalance;
+    txHash?: string;
+    error?: string;
+  }> {
+    // Validate amount
+    if (!amount || !amount.trim()) {
+      return { success: false, error: 'amount is required' };
+    }
+
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount)) {
+      return { success: false, error: 'amount must be a valid number' };
+    }
+    if (numAmount <= 0) {
+      return { success: false, error: 'amount must be greater than zero' };
+    }
+
+    try {
+      // Get wallet provider
+      const wallet = await this.getWalletProvider();
+      
+      // Ensure wallet is connected
+      const connected = await wallet.isConnected();
+      if (!connected) {
+        await wallet.connect();
+      }
+
+      const agentWallet = await wallet.getAddress();
+
+      // Make initial request to get payment requirements
+      const initialResult = await this.gatewayClient.depositCredits(amount);
+
+      // If not 402, something unexpected happened
+      if (initialResult.status !== 402 || !initialResult.paymentRequired) {
+        // Already succeeded without payment (shouldn't happen)
+        if (initialResult.data) {
+          return {
+            success: true,
+            deposited: initialResult.data.deposited,
+            balance: initialResult.data.balance,
+            txHash: initialResult.data.transaction,
+          };
+        }
+        return { success: false, error: 'Unexpected response from gateway' };
+      }
+
+      // Extract payment requirement
+      const paymentRequirement = initialResult.paymentRequired.accepts[0];
+      if (!paymentRequirement) {
+        return { success: false, error: 'No payment method available' };
+      }
+
+      // Build and sign the payment authorization
+      const paymentPayload = await this.buildPaymentPayload(
+        paymentRequirement,
+        agentWallet,
+        wallet
+      );
+
+      // Retry request with payment
+      const paidResult = await this.gatewayClient.depositCredits(amount, paymentPayload);
+
+      // Check if settlement failed (got another 402 after sending payment)
+      if (paidResult.status === 402) {
+        const errorMsg =
+          (paidResult.paymentRequired as { error?: string })?.error ??
+          'Payment settlement failed';
+        return { success: false, error: errorMsg };
+      }
+
+      if (!paidResult.data) {
+        return { success: false, error: 'Deposit failed: no response data' };
+      }
+
+      return {
+        success: true,
+        deposited: paidResult.data.deposited,
+        balance: paidResult.data.balance,
+        txHash: paidResult.data.transaction,
+      };
+    } catch (error) {
+      if (error instanceof UserRejectedError) {
+        return { success: false, error: 'User rejected the payment request' };
+      }
+      if (error instanceof Error) {
+        return { success: false, error: error.message };
+      }
+      return { success: false, error: 'Unknown error occurred' };
+    }
   }
 
   /**
@@ -304,9 +426,9 @@ export class SerenService {
         });
 
         if (altResponse.ok) {
-          const data = await altResponse.json();
+          const data = await altResponse.json() as Record<string, unknown>;
           // Handle both array and object responses
-          const publishers = Array.isArray(data) ? data : (data.publishers || data.providers || []);
+          const publishers = Array.isArray(data) ? data : ((data.publishers || data.providers || []) as Publisher[]);
           if (publishers.length > 0) {
             return {
               success: true,
@@ -328,9 +450,9 @@ export class SerenService {
         };
       }
 
-      const data = await response.json();
+      const data = await response.json() as Record<string, unknown>;
       // Handle both direct publisher object and wrapped responses
-      const publisher = data.publisher || data;
+      const publisher = (data.publisher || data) as Publisher;
       
       return {
         success: true,
@@ -353,6 +475,30 @@ export class SerenService {
   async listTables(apiKey: string, publisherId?: string): Promise<ExecuteQueryResult> {
     const sql = `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;`;
     return this.executeAdminQuery(sql, apiKey, publisherId);
+  }
+
+  /**
+   * Update publisher connection string
+   * @param connectionString - New PostgreSQL connection string
+   * @param apiKey - SerenDB API key for authentication
+   * @returns Success status and message
+   */
+  async updatePublisherConnection(connectionString: string, apiKey: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      if (!connectionString || !connectionString.trim()) {
+        return { success: false, error: 'Connection string is required' };
+      }
+      if (!apiKey || !apiKey.trim()) {
+        return { success: false, error: 'API key is required' };
+      }
+
+      return await this.gatewayClient.updatePublisherConnection(connectionString, apiKey);
+    } catch (error) {
+      if (error instanceof Error) {
+        return { success: false, error: error.message };
+      }
+      return { success: false, error: 'Unknown error occurred' };
+    }
   }
 
   /**
@@ -400,6 +546,125 @@ export class SerenService {
         error: error instanceof Error ? error.message : 'Unknown error occurred',
       };
     }
+  }
+
+  /**
+   * Execute a paid API call via the x402 Gateway
+   * Handles the complete payment flow including signing and retry logic
+   * @param params - API call parameters (publisher, method, path, body)
+   * @returns API response with payment information
+   */
+  async executeApiCall(params: ExecuteApiCallParams): Promise<ExecuteApiCallResult> {
+    // Validate input
+    if (!params.publisherId) {
+      return { success: false, error: 'publisherId is required' };
+    }
+    if (!params.path) {
+      return { success: false, error: 'path is required' };
+    }
+
+    try {
+      // Get wallet provider
+      const wallet = await this.getWalletProvider();
+      
+      // Ensure wallet is connected
+      const connected = await wallet.isConnected();
+      if (!connected) {
+        await wallet.connect();
+      }
+
+      const agentWallet = await wallet.getAddress();
+
+      // Make initial request to get payment requirements
+      const initialResult = await this.gatewayClient.proxyRequest({
+        publisherId: params.publisherId,
+        agentWallet,
+        request: {
+          method: params.method ?? 'GET',
+          path: params.path,
+          body: params.body,
+          headers: params.headers,
+        },
+      });
+
+      // If not 402, no payment needed or something unexpected
+      if (initialResult.status !== 402 || !initialResult.paymentRequired) {
+        return {
+          success: true,
+          data: initialResult.data,
+        };
+      }
+
+      // Extract payment requirement
+      const paymentRequirement = initialResult.paymentRequired.accepts[0];
+      if (!paymentRequirement) {
+        return { success: false, error: 'No payment method available' };
+      }
+
+      // Build and sign the payment authorization
+      const paymentPayload = await this.buildPaymentPayload(
+        paymentRequirement,
+        agentWallet,
+        wallet
+      );
+
+      // Retry request with payment
+      const paidResult = await this.gatewayClient.proxyRequest(
+        {
+          publisherId: params.publisherId,
+          agentWallet,
+          request: {
+            method: params.method ?? 'GET',
+            path: params.path,
+            body: params.body,
+            headers: params.headers,
+          },
+        },
+        paymentPayload
+      );
+
+      // Check if settlement failed
+      if (paidResult.status === 402) {
+        const errorMsg = (paidResult.paymentRequired as { error?: string })?.error ?? 'Payment settlement failed';
+        return { success: false, error: errorMsg };
+      }
+
+      // Extract transaction hash
+      let txHash: string | undefined;
+      if (paidResult.paymentResponse) {
+        const paymentResponse = this.gatewayClient.decodePaymentResponse(paidResult.paymentResponse) as {
+          transaction?: string;
+          txHash?: string;
+        };
+        txHash = paymentResponse.transaction || paymentResponse.txHash;
+      }
+
+      return {
+        success: true,
+        data: paidResult.data,
+        cost: this.formatUsdc(paymentRequirement.maxAmountRequired),
+        txHash,
+      };
+    } catch (error) {
+      if (error instanceof UserRejectedError) {
+        return { success: false, error: 'User rejected the payment request' };
+      }
+      if (error instanceof Error) {
+        return { success: false, error: error.message };
+      }
+      return { success: false, error: 'Unknown error occurred' };
+    }
+  }
+
+  /**
+   * Format USDC amount for display
+   */
+  private formatUsdc(amount: string): string {
+    const value = BigInt(amount);
+    const decimals = 6n;
+    const whole = value / (10n ** decimals);
+    const fraction = value % (10n ** decimals);
+    return `${whole}.${fraction.toString().padStart(6, '0')} USDC`;
   }
 
   /**

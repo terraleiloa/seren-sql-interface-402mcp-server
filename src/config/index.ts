@@ -21,6 +21,11 @@ const configSchema = z.object({
   // Development
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  
+  // Query timeout configuration (in milliseconds)
+  QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(120000), // 2 minutes default
+  QUERY_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
+  QUERY_RETRY_DELAY_MS: z.coerce.number().int().positive().default(1000), // 1 second delay between retries
 });
 
 export const config = configSchema.parse(process.env);

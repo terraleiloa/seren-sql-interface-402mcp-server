@@ -1,0 +1,48 @@
+Federal Government - 340079
+State Government - 13773
+City Government - 11426
+University - 6160
+County Government - 34
+
+A plan for each name get the associated datasets to make it's own api publisher or if there is a direct api to download the data and import it into it's own database publisher 
+Use this structure for creating API publishers
+Use this structure for creating Database publishers
+
+https://dataverse.harvard.edu/
+https://ec.europa.eu/eurostat/data/database
+UN Data commons https://unstats.un.org/UNSDWebsite/undatacommons/sdgs
+Opendata n AWS https://registry.opendata.aws/
+
+
+
+food insecurity in us https://map.feedingamerica.org/
+https://www.icpsr.umich.edu/sites/icpsr/find-data
+
+Dept of commerce https://data.commerce.gov/
+https://guides.library.msstate.edu/c.php?g=1023952&p=8383530
+
+https://www.checkbooknyc.com/api?type_of_data=Contracts&&fiscal_year=2025
+
+This worker function _process_datasource_worker_incremental is very similar to _process_datasource_worker in ingest_data.py. There's a lot of duplicated code for handling URLs, getting ingestors, and logging results. Consider refactoring this into a single, more generic worker function that can be used by both scripts. You could pass a parameter or a strategy object to handle the differences in fetch logic (full vs. incremental). This would improve maintainability by reducing code duplication.
+
+epilepsies
+sleuth Andrew pano 
+
+patient advocy groups for genetic diseaeses drugs
+some house there own data
+the marfan foundation  connective tissue
+
+Credflow.ai
+Elizabeth Kukka
+(liz@credflow.ai)
+
+Chaitanya Hiremath
+chaitanya@credflow.ai
+
+use seren embed mcp to convert each row in the db to a vector so that anyone can query the api endpoint with a vector query the database we are going to use is the _____data connection string 
+
+test with first two rows 
+
+make sure cron works
+
+all the text documents to full text embeddings 

@@ -35,6 +35,8 @@ export class GatewayClient {
     const response = await fetch(url);
 
     if (!response.ok) {
+      // Consume error response body to ensure connection is closed
+      await response.text().catch(() => '');
       throw new Error(`Failed to list publishers: ${response.status}`);
     }
 
@@ -68,6 +70,8 @@ export class GatewayClient {
     const response = await fetch(`${this.baseUrl}/api/catalog/${publisherId}`);
 
     if (!response.ok) {
+      // Consume error response body to ensure connection is closed
+      await response.text().catch(() => '');
       throw new Error(`Publisher not found: ${publisherId}`);
     }
 
@@ -81,6 +85,8 @@ export class GatewayClient {
     const response = await fetch(`${this.baseUrl}/api/publishers/${publisherId}/pricing`);
 
     if (!response.ok) {
+      // Consume error response body to ensure connection is closed
+      await response.text().catch(() => '');
       if (response.status === 404) {
         throw new Error(`Pricing configuration not found for publisher: ${publisherId}`);
       }
@@ -149,7 +155,8 @@ export class GatewayClient {
    */
   async queryDatabase(
     request: QueryRequest,
-    paymentPayload?: PaymentPayload
+    paymentPayload?: PaymentPayload,
+    timeoutMs?: number
   ): Promise<{
     status: number;
     data?: QueryResult;
@@ -166,33 +173,99 @@ export class GatewayClient {
 
     const url = `${this.baseUrl}/api/query`;
     const body = JSON.stringify(request);
+    
+    // Set up timeout using AbortController
+    const timeout = timeoutMs ?? config.QUERY_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-    });
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
 
     if (response.status === 402) {
       const paymentRequired = await response.json() as PaymentRequirementsResponse;
       return { status: 402, paymentRequired };
     }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorBody: { error?: string };
-      try {
-        errorBody = JSON.parse(errorText);
-      } catch {
-        errorBody = { error: errorText || 'Unknown error' };
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorBody: Record<string, unknown>;
+        try {
+          errorBody = JSON.parse(errorText);
+        } catch {
+          errorBody = { error: errorText || 'Unknown error', rawResponse: errorText };
+        }
+        
+        // Build detailed error message
+        const errorParts: string[] = [
+          `Query request failed (HTTP ${response.status} ${response.statusText})`
+        ];
+        
+        // Include error message if available
+        if (errorBody.error) {
+          errorParts.push(`Error: ${errorBody.error}`);
+        }
+        
+        // Include full error body for debugging (if it's an object with more fields)
+        const errorBodyStr = JSON.stringify(errorBody, null, 2);
+        if (errorBodyStr && errorBodyStr !== JSON.stringify({ error: errorBody.error })) {
+          errorParts.push(`Full error response: ${errorBodyStr}`);
+        }
+        
+        // Create error with full details
+        const error = new Error(errorParts.join('\n'));
+        // Attach additional context as properties for programmatic access
+        (error as any).statusCode = response.status;
+        (error as any).statusText = response.statusText;
+        (error as any).errorBody = errorBody;
+        (error as any).requestDetails = {
+          url,
+          publisherId: request.publisherId,
+          sql: request.sql,
+          hasPayment: !!paymentPayload
+        };
+        throw error;
       }
-      throw new Error(`Query request failed: ${errorBody.error ?? response.status}`);
+
+      const data = await response.json() as QueryResult;
+      const paymentResponse = response.headers.get('X-PAYMENT-RESPONSE') ?? undefined;
+
+      return { status: 200, data, paymentResponse };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      // Handle timeout/abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        const timeoutError = new Error(`Query request timed out after ${timeout}ms`);
+        (timeoutError as any).statusCode = 408; // Request Timeout
+        (timeoutError as any).statusText = 'Request Timeout';
+        (timeoutError as any).errorBody = { 
+          error: 'Request timeout', 
+          details: `Query exceeded timeout of ${timeout}ms`,
+          timeoutMs: timeout 
+        };
+        (timeoutError as any).requestDetails = {
+          url,
+          publisherId: request.publisherId,
+          sql: request.sql,
+          hasPayment: !!paymentPayload
+        };
+        throw timeoutError;
+      }
+      
+      // Note: fetch API automatically closes connections when response body is consumed
+      // or when the request is aborted, so no manual cleanup needed here
+      
+      // Re-throw other errors
+      throw error;
     }
-
-    const data = await response.json() as QueryResult;
-    const paymentResponse = response.headers.get('X-PAYMENT-RESPONSE') ?? undefined;
-
-    return { status: 200, data, paymentResponse };
   }
 
   /**
@@ -202,6 +275,8 @@ export class GatewayClient {
     const response = await fetch(`${this.baseUrl}/api/credits/${agentWallet}`);
 
     if (!response.ok) {
+      // Consume error response body to ensure connection is closed
+      const errorText = await response.text().catch(() => '');
       if (response.status === 404) {
         throw new Error('Credit balance not found');
       }
@@ -240,6 +315,51 @@ export class GatewayClient {
     }
 
     return response.json() as Promise<CreditBalance>;
+  }
+
+  /**
+   * Update publisher connection string
+   */
+  async updatePublisherConnection(
+    connectionString: string,
+    apiKey: string
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
+    const url = `${this.baseUrl}/api/publishers/update`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    };
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ connectionString }),
+    });
+
+    if (!response.ok) {
+      // Consume error response body to ensure connection is closed
+      const errorText = await response.text();
+      let errorBody: { error?: string; message?: string };
+      try {
+        errorBody = JSON.parse(errorText);
+      } catch {
+        errorBody = { error: errorText || 'Unknown error' };
+      }
+
+      const errorMessage = errorBody.error || errorBody.message || `Failed to update publisher connection: ${response.status}`;
+      
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Authentication failed: ${errorMessage}`);
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json() as { message?: string };
+    return {
+      success: true,
+      message: data.message || 'Connection string updated successfully',
+    };
   }
 
   /**

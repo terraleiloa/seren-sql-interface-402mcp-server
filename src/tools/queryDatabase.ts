@@ -8,6 +8,8 @@ import { isInsufficientCreditError } from '../gateway/types.js';
 import { UserRejectedError } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
 import { formatUsdc } from '../utils/usdc.js';
+import { retryWithBackoff, isRetryableError } from '../utils/retry.js';
+import { config } from '../config/index.js';
 
 export interface QueryDatabaseInput {
   publisher_id: string;
@@ -40,6 +42,11 @@ export async function queryDatabase(
   }
 
   try {
+    // Log query before execution
+    console.log('\n📝 Executing query:');
+    console.log('SQL:', input.sql.trim());
+    console.log('Publisher ID:', input.publisher_id);
+    
     // Ensure wallet is connected
     const connected = await wallet.isConnected();
     if (!connected) {
@@ -47,13 +54,36 @@ export async function queryDatabase(
     }
 
     const agentWallet = await wallet.getAddress();
+    console.log('Agent Wallet:', agentWallet);
 
-    // Make initial request to get payment requirements
-    const initialResult = await gateway.queryDatabase({
-      publisherId: input.publisher_id,
-      agentWallet,
-      sql: input.sql,
-    });
+    // Make initial request to get payment requirements (with retry for connection issues)
+    const initialResult = await retryWithBackoff(
+      async () => {
+        return await gateway.queryDatabase({
+          publisherId: input.publisher_id,
+          agentWallet,
+          sql: input.sql,
+        });
+      },
+      {
+        maxAttempts: config.QUERY_RETRY_ATTEMPTS + 1, // +1 because first attempt is not a retry
+        delayMs: config.QUERY_RETRY_DELAY_MS,
+        shouldRetry: (error, attempt) => {
+          // Only retry on retryable errors (timeouts, connection issues, 5xx errors)
+          // Note: 402 responses are returned normally, not thrown, so they won't trigger retries
+          return isRetryableError(error);
+        },
+        onRetry: (error, attempt) => {
+          console.warn(`⚠️  Query request failed (attempt ${attempt}), retrying...`);
+          if (error instanceof Error) {
+            const errorAny = error as any;
+            if (errorAny.errorBody?.details) {
+              console.warn(`   Error: ${errorAny.errorBody.details}`);
+            }
+          }
+        }
+      }
+    );
 
     // If not 402, something unexpected or no payment needed
     if (initialResult.status !== 402 || !initialResult.paymentRequired) {
@@ -93,14 +123,38 @@ export async function queryDatabase(
       wallet
     );
 
-    // Retry request with payment
-    const paidResult = await gateway.queryDatabase(
-      {
-        publisherId: input.publisher_id,
-        agentWallet,
-        sql: input.sql,
+    // Retry request with payment (with retry for connection issues)
+    const paidResult = await retryWithBackoff(
+      async () => {
+        return await gateway.queryDatabase(
+          {
+            publisherId: input.publisher_id,
+            agentWallet,
+            sql: input.sql,
+          },
+          paymentPayload
+        );
       },
-      paymentPayload
+      {
+        maxAttempts: config.QUERY_RETRY_ATTEMPTS + 1, // +1 because first attempt is not a retry
+        delayMs: config.QUERY_RETRY_DELAY_MS,
+        shouldRetry: (error, attempt) => {
+          // Don't retry on 402 (payment settlement issues shouldn't be retried automatically)
+          if (error && typeof error === 'object' && 'status' in error && (error as any).status === 402) {
+            return false;
+          }
+          return isRetryableError(error);
+        },
+        onRetry: (error, attempt) => {
+          console.warn(`⚠️  Paid query request failed (attempt ${attempt}), retrying...`);
+          if (error instanceof Error) {
+            const errorAny = error as any;
+            if (errorAny.errorBody?.details) {
+              console.warn(`   Error: ${errorAny.errorBody.details}`);
+            }
+          }
+        }
+      }
     );
 
     // Check if settlement failed (got another 402 after sending payment)
@@ -140,7 +194,38 @@ export async function queryDatabase(
       return { success: false, error: 'User rejected the payment request' };
     }
     if (error instanceof Error) {
-      return { success: false, error: error.message };
+      // Build detailed error message
+      let errorMessage = error.message;
+      
+      // If error has additional context, include it
+      const errorAny = error as any;
+      if (errorAny.statusCode || errorAny.errorBody || errorAny.requestDetails) {
+        const details: string[] = [errorMessage];
+        
+        if (errorAny.statusCode) {
+          details.push(`HTTP Status: ${errorAny.statusCode} ${errorAny.statusText || ''}`.trim());
+        }
+        
+        if (errorAny.errorBody) {
+          const errorBodyStr = typeof errorAny.errorBody === 'string' 
+            ? errorAny.errorBody 
+            : JSON.stringify(errorAny.errorBody, null, 2);
+          details.push(`Error Details: ${errorBodyStr}`);
+        }
+        
+        if (errorAny.requestDetails) {
+          details.push(`Request Context: ${JSON.stringify(errorAny.requestDetails, null, 2)}`);
+        }
+        
+        errorMessage = details.join('\n');
+      }
+      
+      // Include stack trace if available (for debugging)
+      if (error.stack && process.env.DEBUG) {
+        errorMessage += `\nStack trace: ${error.stack}`;
+      }
+      
+      return { success: false, error: errorMessage };
     }
     return { success: false, error: 'Unknown error occurred' };
   }
