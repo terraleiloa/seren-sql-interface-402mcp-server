@@ -9,6 +9,7 @@ import { UserRejectedError } from '../wallet/types.js';
 import { buildDomain, buildAuthorizationMessage, buildTypedData } from '../signing/eip712.js';
 import { formatUsdc } from '../utils/usdc.js';
 import { truncateResponse } from '../utils/truncate.js';
+import { depositCredits } from './depositCredits.js';
 
 export interface QueryDatabaseInput {
   publisher_id: string;
@@ -26,6 +27,10 @@ export interface QueryDatabaseOutput {
   error?: string;
   truncated?: boolean;
   originalSizeBytes?: number;
+  depositInfo?: {
+    deposited: string;
+    txHash: string;
+  };
 }
 
 /**
@@ -78,11 +83,57 @@ export async function queryDatabase(
     }
 
     // Check if this is an insufficient credit error (prepaid credits publisher)
+    // Auto-deposit the minimum required amount and retry the query
     if (isInsufficientCreditError(initialResult.paymentRequired)) {
       const creditError = initialResult.paymentRequired;
+
+      // Auto-deposit the minimum required amount
+      const depositResult = await depositCredits(
+        { amount: creditError.minimumRequired },
+        wallet,
+        gateway
+      );
+
+      if (!depositResult.success) {
+        return {
+          success: false,
+          error: `Auto-deposit failed: ${depositResult.error}. You need ${creditError.minimumRequired} USDC to use this publisher.`,
+        };
+      }
+
+      // Retry the original query after successful deposit
+      const retryResult = await gateway.queryDatabase({
+        publisherId: input.publisher_id,
+        agentWallet,
+        sql: input.sql,
+      });
+
+      // Handle retry result
+      if (retryResult.status === 402) {
+        const errorMsg =
+          (retryResult.paymentRequired as { error?: string })?.error ??
+          'Query failed after deposit - insufficient balance';
+        return { success: false, error: errorMsg };
+      }
+
+      if (!retryResult.data) {
+        return { success: false, error: 'No data returned after deposit' };
+      }
+
+      const truncatedRetry = truncateResponse(retryResult.data.rows);
       return {
-        success: false,
-        error: `Insufficient credit balance. Minimum required: ${creditError.minimumRequired} USDC. Please deposit funds to continue.`,
+        success: true,
+        rows: truncatedRetry.data as unknown[],
+        rowCount: retryResult.data.rowCount,
+        estimatedCost: retryResult.data.estimatedCost,
+        actualCost: retryResult.data.actualCost,
+        executionTime: retryResult.data.executionTime,
+        truncated: truncatedRetry.truncated || undefined,
+        originalSizeBytes: truncatedRetry.originalSizeBytes,
+        depositInfo: {
+          deposited: depositResult.deposited!,
+          txHash: depositResult.txHash!,
+        },
       };
     }
 
